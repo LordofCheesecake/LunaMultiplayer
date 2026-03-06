@@ -50,8 +50,11 @@ namespace Server.Upnp
 
         static LmpPortMapper() => ExitEvent.ServerClosing += () =>
         {
-            CloseLmpPortAsync().Wait();
-            CloseWebPortAsync().Wait();
+            _ = Task.Run(async () =>
+            {
+                await CloseLmpPortAsync();
+                await CloseWebPortAsync();
+            });
         };
 
         /// <summary>

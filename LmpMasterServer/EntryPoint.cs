@@ -23,7 +23,7 @@ namespace LmpMasterServer
         {
             Lidgren.MasterServer.RunServer = false;
             LunaHttpServer.Server.Dispose();
-            MasterServerPortMapper.RemoveOpenedPortsAsync().Wait();
+            _ = Task.Run(MasterServerPortMapper.RemoveOpenedPortsAsync);
         }
 
         public static void MainEntryPoint(string[] args)
