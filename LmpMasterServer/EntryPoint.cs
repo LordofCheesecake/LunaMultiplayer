@@ -23,10 +23,10 @@ namespace LmpMasterServer
         {
             Lidgren.MasterServer.RunServer = false;
             LunaHttpServer.Server.Dispose();
-            MasterServerPortMapper.RemoveOpenedPortsAsync().Wait();
+            _ = Task.Run(MasterServerPortMapper.RemoveOpenedPortsAsync);
         }
 
-        public static void MainEntryPoint(string[] args)
+        public static async Task MainEntryPointAsync(string[] args)
         {
             MasterServerPortMapper.UseUpnp = !args.Any(a => a.Contains("noupnp"));
             IsNightly = args.Any(a => a.Contains("nightly"));
@@ -51,7 +51,7 @@ namespace LmpMasterServer
 
             if (!ParseMasterServerPortNumber(commandLineArguments)) return;
             if (!ParseHttpServerPort(commandLineArguments)) return;
-            MasterServerPortMapper.OpenPortAsync().GetAwaiter().GetResult();
+            await MasterServerPortMapper.OpenPortAsync();
 
             LunaLog.Normal($"Starting MasterServer at port: {Lidgren.MasterServer.Port}");
             if (IsNightly)

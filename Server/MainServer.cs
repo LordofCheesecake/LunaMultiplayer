@@ -183,7 +183,7 @@ namespace Server
             LunaLog.Normal("Exiting... Please wait until all threads are finished");
             ExitEvent.Exit();
 
-            CancellationTokenSrc.Cancel();
+            await CancellationTokenSrc.CancelAsync();
             await Task.WhenAll(TaskContainer);
 
             ServerContext.Shutdown("Server is shutting down");
@@ -201,7 +201,7 @@ namespace Server
             LunaLog.Normal("Restarting...  Please wait until all threads are finished");
 
             ServerContext.Shutdown("Server is restarting");
-            CancellationTokenSrc.Cancel();
+            await CancellationTokenSrc.CancelAsync();
             await Task.WhenAll(TaskContainer);
 
             IsRestart = true;
