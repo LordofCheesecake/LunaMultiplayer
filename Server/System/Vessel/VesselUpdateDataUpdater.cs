@@ -60,6 +60,10 @@ namespace Server.System.Vessel
                         vessel.Fields.Update("ctrl", msgData.WasControllable.ToString(CultureInfo.InvariantCulture));
                         vessel.Fields.Update("stg", msgData.Stage.ToString(CultureInfo.InvariantCulture));
 
+                        ApplyOrbitIdent(vessel, msgData.BodyName);
+
+                        VesselStoreSystem.PersistVesselToFile(msgData.VesselId);
+
                         //NEVER! patch the CoM in the protovessel as then it will be drawn with incorrect CommNet lines!
                         //vessel.Fields.Update("CoM", $"{msgData.Com[0].ToString(CultureInfo.InvariantCulture)}," +
                         //                                $"{msgData.Com[1].ToString(CultureInfo.InvariantCulture)}," +
