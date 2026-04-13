@@ -169,6 +169,7 @@
     <Compile Include="Harmony\EVAConstructionModeEditor_DropAttachablePart.cs" />
     <Compile Include="Harmony\ModuleDockingNode_DockToVessel.cs" />
     <Compile Include="Harmony\ContractSystem_OnAwake.cs" />
+    <Compile Include="Harmony\ContractSystem_OnLoad.cs" />
     <Compile Include="Harmony\FlightDriver_SetStartupNewVessel.cs" />
     <Compile Include="Harmony\FlightDriver_Start.cs" />
     <Compile Include="Harmony\FlightResultsDialog_SetupGUI.cs" />
@@ -877,6 +878,6 @@
     <PostBuildEvent Condition="'$(OS)' != 'Unix'">if /I "$(ConfigurationName)" == "Debug" call  "$(ProjectDir)..\Scripts\CopyToKSPDirectory.bat" $(ConfigurationName)</PostBuildEvent>
   </PropertyGroup>
   <PropertyGroup>
-    <PreBuildEvent Condition="'$(OS)' != 'Unix'">xcopy /Y "$(ProjectDir)..\External\Dependencies\*.dll" "$(TargetDir)"</PreBuildEvent>
+    <PreBuildEvent Condition="'$(OS)' != 'Unix'">xcopy /Y /S "$(ProjectDir)..\External\Dependencies\*.dll" "$(TargetDir)"</PreBuildEvent>
   </PropertyGroup>
 </Project>
