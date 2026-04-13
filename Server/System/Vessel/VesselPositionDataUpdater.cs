@@ -30,13 +30,13 @@ namespace Server.System.Vessel
         public static void WritePositionDataToFile(VesselBaseMsgData message)
         {
             if (!(message is VesselPositionMsgData msgData)) return;
-            if (VesselContext.RemovedVessels.Contains(msgData.VesselId)) return;
+            if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
             if (!LastPositionUpdateDictionary.TryGetValue(msgData.VesselId, out var lastUpdated) || (DateTime.Now - lastUpdated).TotalMilliseconds > FilePositionUpdateIntervalMs)
             {
                 LastPositionUpdateDictionary.AddOrUpdate(msgData.VesselId, DateTime.Now, (key, existingVal) => DateTime.Now);
 
-                Task.Run(() =>
+                _ = Task.Run(() =>
                 {
                     lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {
@@ -65,6 +65,10 @@ namespace Server.System.Vessel
                         vessel.Orbit.Update("MNA", msgData.Orbit[5].ToString(CultureInfo.InvariantCulture));
                         vessel.Orbit.Update("EPH", msgData.Orbit[6].ToString(CultureInfo.InvariantCulture));
                         vessel.Orbit.Update("REF", msgData.Orbit[7].ToString(CultureInfo.InvariantCulture));
+
+                        ApplyOrbitIdent(vessel, msgData.BodyName);
+
+                        VesselStoreSystem.PersistVesselToFile(msgData.VesselId);
                     }
                 });
             }
