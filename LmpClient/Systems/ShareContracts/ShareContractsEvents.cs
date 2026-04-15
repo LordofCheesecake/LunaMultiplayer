@@ -78,12 +78,87 @@ namespace LmpClient.Systems.ShareContracts
         public void ContractsLoaded()
         {
             LunaLog.Log("Contracts loaded.");
-            // Safe point to stop ignoring events: ContractSystem.OnLoad() has fully completed.
-            // ContractOffered from new contract generation cannot fire until LockAcquire sets
-            // generateContractIterations back to the default, which always happens after
-            // LevelLoaded/TryGetContractLock. So there is no race between this and LockAcquire.
+            // Safe point to stop ignoring events: ContractSystem.OnLoad() has fully completed
+            // and any post-load mod processing (e.g. Contract Configurator sweeps) that fires
+            // onOffered is now behind us. ContractOffered from new generation cannot fire until
+            // LockAcquire sets generateContractIterations back to the default.
             System.StopIgnoringEvents();
+            LogContractStateBreakdown();
+            ReconcileFinishedContracts();
             CreateUnavailableContractStubs();
+        }
+
+        /// <summary>
+        /// Logs a breakdown of how many contracts are currently in ContractSystem.Instance
+        /// split by state, to aid in diagnosing sync issues after load.
+        /// </summary>
+        private static void LogContractStateBreakdown()
+        {
+            if (ContractSystem.Instance == null) return;
+
+            var offered = 0;
+            var active = 0;
+            var finished = 0;
+            var other = 0;
+
+            foreach (var c in ContractSystem.Instance.Contracts)
+            {
+                if (c == null) continue;
+                switch (c.ContractState)
+                {
+                    case Contract.State.Offered:    offered++;  break;
+                    case Contract.State.Active:     active++;   break;
+                    case Contract.State.Completed:
+                    case Contract.State.Failed:
+                    case Contract.State.Cancelled:
+                    case Contract.State.Withdrawn:
+                    case Contract.State.DeadlineExpired:
+                        finished++;
+                        break;
+                    default:
+                        other++;
+                        break;
+                }
+            }
+
+            LunaLog.Log($"[ShareContracts]: ContractsLoaded state — " +
+                        $"Contracts list: {offered} Offered, {active} Active, {finished} Finished-in-wrong-list, {other} Other | " +
+                        $"ContractsFinished list: {ContractSystem.Instance.ContractsFinished.Count}");
+        }
+
+        /// <summary>
+        /// The server persists Completed/Failed/Cancelled contracts in the CONTRACTS section
+        /// until a client update triggers the server-side migrator. KSP's ContractSystem.OnLoad
+        /// puts every entry from CONTRACTS into ContractSystem.Contracts regardless of state,
+        /// so those finished contracts never reach ContractSystem.ContractsFinished and remain
+        /// invisible in the Archive tab.
+        ///
+        /// This method detects the mismatch and moves every finished contract from Contracts to
+        /// ContractsFinished so the Archive tab shows them immediately on connect.
+        /// </summary>
+        private static void ReconcileFinishedContracts()
+        {
+            if (ContractSystem.Instance == null) return;
+
+            var toMove = new System.Collections.Generic.List<Contract>();
+            foreach (var c in ContractSystem.Instance.Contracts)
+            {
+                if (c == null || c is LmpUnavailableContract) continue;
+                if (c.IsFinished())
+                    toMove.Add(c);
+            }
+
+            if (toMove.Count == 0) return;
+
+            foreach (var c in toMove)
+            {
+                ContractSystem.Instance.Contracts.Remove(c);
+                ContractSystem.Instance.ContractsFinished.Add(c);
+                LunaLog.Log($"[ShareContracts]: Moved finished contract {c.ContractGuid} ({c.GetType().Name}, " +
+                            $"state: {c.ContractState}) from Contracts to ContractsFinished.");
+            }
+
+            LunaLog.Log($"[ShareContracts]: Reconciled {toMove.Count} finished contract(s) into the Archive list.");
         }
 
         /// <summary>
