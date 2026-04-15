@@ -4,6 +4,8 @@ using LmpClient.Base;
 using LmpClient.Systems.Lock;
 using LmpClient.Systems.SettingsSys;
 using LmpCommon.Locks;
+using System;
+using System.Collections.Generic;
 
 namespace LmpClient.Systems.ShareContracts
 {
@@ -81,6 +83,103 @@ namespace LmpClient.Systems.ShareContracts
             // generateContractIterations back to the default, which always happens after
             // LevelLoaded/TryGetContractLock. So there is no race between this and LockAcquire.
             System.StopIgnoringEvents();
+            CreateUnavailableContractStubs();
+        }
+
+        /// <summary>
+        /// After the ContractSystem finishes loading from the server snapshot, compares the set of
+        /// contracts that actually loaded against the set that were expected. For each Offered
+        /// contract that is absent — dropped by ContractConfigurator due to a missing mod type, or
+        /// stripped pre-load due to a missing part — an <see cref="LmpUnavailableContract"/> stub
+        /// is added to <see cref="ContractSystem.Instance"/> so the player can see which server
+        /// contracts they cannot take on their client.
+        /// </summary>
+        private void CreateUnavailableContractStubs()
+        {
+            if (!System.Enabled) return;
+            if (ContractSystem.Instance == null) return;
+
+            var pending = System.PendingUnavailableContracts;
+            if (pending.Count == 0) return;
+
+            // Map GUID → contract object so we can inspect broken shells, not just presence.
+            var loadedContracts = new Dictionary<string, Contract>();
+            foreach (var contract in ContractSystem.Instance.Contracts)
+            {
+                if (contract != null && !(contract is LmpUnavailableContract))
+                    loadedContracts[contract.ContractGuid.ToString()] = contract;
+            }
+
+            var stubsCreated = 0;
+            foreach (var kvp in pending)
+            {
+                var guid = kvp.Key;
+                loadedContracts.TryGetValue(guid, out var loaded);
+
+                bool needsStub;
+                if (loaded == null)
+                {
+                    // Contract was stripped pre-load or completely failed to produce an object.
+                    needsStub = true;
+                }
+                else if (loaded.ParameterCount == 0)
+                {
+                    // Contract loaded as a parameterless shell — ContractConfigurator could not
+                    // find the contract type (missing mod). CC's MeetRequirements() returns false
+                    // for these, making them silently invisible. Replace with an informative stub.
+                    ContractSystem.Instance.Contracts.Remove(loaded);
+                    needsStub = true;
+                }
+                else
+                {
+                    needsStub = false;
+                }
+
+                if (!needsStub) continue;
+
+                try
+                {
+                    var stub = BuildUnavailableContractStub(guid, kvp.Value.TypeName, kvp.Value.MissingAsset);
+                    if (stub != null)
+                    {
+                        ContractSystem.Instance.Contracts.Add(stub);
+                        stubsCreated++;
+                        LunaLog.Log($"[ShareContracts]: Created unavailability stub for {guid} (type: {kvp.Value.TypeName}" +
+                                    (kvp.Value.MissingAsset != null ? $", missing part: {kvp.Value.MissingAsset}" : string.Empty) + ").");
+                    }
+                }
+                catch (Exception e)
+                {
+                    LunaLog.LogError($"[ShareContracts]: Failed to create unavailability stub for {guid}: {e.Message}");
+                }
+            }
+
+            pending.Clear();
+
+            if (stubsCreated > 0)
+            {
+                LunaLog.Log($"[ShareContracts]: {stubsCreated} unavailability stub(s) added to the Available contracts list.");
+                GameEvents.Contract.onContractsListChanged.Fire();
+            }
+        }
+
+        private static LmpUnavailableContract BuildUnavailableContractStub(string guid, string typeName, string missingAsset)
+        {
+            var node = new ConfigNode();
+            node.AddValue("guid", guid);
+            node.AddValue("prestige", "Trivial");
+            node.AddValue("seed", "0");
+            node.AddValue("state", "Offered");
+            node.AddValue("viewed", "Unseen");
+            node.AddValue("deadlineType", "None");
+            node.AddValue("expiryType", "None");
+            node.AddValue("ignoresWeight", "True");
+            node.AddValue("values", "0,0,0,0,0,0,0,0,0,0,0,0");
+            node.AddValue(LmpUnavailableContract.OriginalTypeKey, typeName);
+            if (missingAsset != null)
+                node.AddValue(LmpUnavailableContract.MissingAssetKey, missingAsset);
+
+            return Contract.Load(new LmpUnavailableContract(), node) as LmpUnavailableContract;
         }
 
         public void ContractDeclined(Contract contract)
@@ -109,6 +208,9 @@ namespace LmpClient.Systems.ShareContracts
 
         public void ContractOffered(Contract contract)
         {
+            // LmpUnavailableContract stubs are injected by LMP itself — never touch them here.
+            if (contract is LmpUnavailableContract) return;
+
             // Allow contracts being loaded from server data to pass through untouched.
             // IgnoreEvents is set both during ContractUpdate (ShareProgress path) and during
             // ContractSystem.OnLoad() (scenario restore path) via ContractSystem_OnLoad patch.
@@ -119,24 +221,21 @@ namespace LmpClient.Systems.ShareContracts
                 //We don't have the contract lock, so discard any contract KSP generated locally.
                 //New generation is already suppressed via generateContractIterations = 0; this
                 //is a safety net for any edge case where KSP still fires the event.
-                contract.Withdraw();
-                contract.Kill();
+                WithdrawAndRemoveContract(contract);
                 return;
             }
 
             if (contract.GetType().Name == "RecoverAsset")
             {
                 //We don't support rescue contracts. See: https://github.com/LunaMultiplayer/LunaMultiplayer/issues/226#issuecomment-431831526
-                contract.Withdraw();
-                contract.Kill();
+                WithdrawAndRemoveContract(contract);
                 return;
             }
 
             if (contract.GetType().Name == "TourismContract")
             {
                 //We don't support tourism contracts.
-                contract.Withdraw();
-                contract.Kill();
+                WithdrawAndRemoveContract(contract);
                 return;
             }
 
@@ -169,5 +268,20 @@ namespace LmpClient.Systems.ShareContracts
         }
 
         #endregion
+
+        /// <summary>
+        /// Withdraws a locally-generated contract and removes it from the ContractSystem without
+        /// calling Contract.Kill(). Kill() destroys Unity GameObjects that ContractsApp's UIList
+        /// may already hold references to, causing a NullReferenceException in UIList.Clear() the
+        /// next time the contracts panel is opened. Withdraw() fires onContractsListChanged so the
+        /// UI rebuilds cleanly while the entry is still alive, after which the contract is safely
+        /// removed from memory.
+        /// </summary>
+        private static void WithdrawAndRemoveContract(Contract contract)
+        {
+            contract.Withdraw();
+            ContractSystem.Instance.Contracts.Remove(contract);
+            contract.Unregister();
+        }
     }
 }

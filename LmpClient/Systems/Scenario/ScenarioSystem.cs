@@ -1,6 +1,7 @@
 ﻿using LmpClient.Base;
 using LmpClient.Extensions;
 using LmpClient.Systems.SettingsSys;
+using LmpClient.Systems.ShareContracts;
 using LmpClient.Utilities;
 using LmpCommon;
 using System;
@@ -184,14 +185,17 @@ namespace LmpClient.Systems.Scenario
 
                 if (scenarioEntry.ScenarioModule == "ContractSystem")
                 {
+                    Dictionary<string, (string TypeName, string MissingAsset)> strippedParts = null;
                     try
                     {
-                        StripContractsWithMissingParts(scenarioEntry.ScenarioNode);
+                        strippedParts = StripContractsWithMissingParts(scenarioEntry.ScenarioNode);
                     }
                     catch (Exception e)
                     {
                         LunaLog.LogError($"[ShareContracts]: Error while pre-filtering ContractSystem scenario data: {e.Message}. The scenario will be loaded as-is.");
                     }
+
+                    ShareContractsSystem.Singleton?.PrepareUnavailableContractStubs(scenarioEntry.ScenarioNode, strippedParts);
                 }
 
 
@@ -224,13 +228,21 @@ namespace LmpClient.Systems.Scenario
         /// in this client's install. Such contracts would throw an exception during ContractSystem.OnLoad()
         /// and display an error popup. They are silently dropped here instead, with a log warning.
         /// </summary>
-        private static void StripContractsWithMissingParts(ConfigNode scenarioNode)
+        /// <returns>
+        /// A dictionary mapping GUID → missing part name for every contract that was stripped.
+        /// Passed to <see cref="ShareContractsSystem.PrepareUnavailableContractStubs"/> so that
+        /// unavailability stubs can report the specific missing part.
+        /// </returns>
+        private static Dictionary<string, (string TypeName, string MissingAsset)> StripContractsWithMissingParts(ConfigNode scenarioNode)
         {
-            StripContractSectionWithMissingParts(scenarioNode, "CONTRACTS");
-            StripContractSectionWithMissingParts(scenarioNode, "CONTRACTS_FINISHED");
+            var stripped = new Dictionary<string, (string, string)>();
+            StripContractSectionWithMissingParts(scenarioNode, "CONTRACTS", stripped);
+            StripContractSectionWithMissingParts(scenarioNode, "CONTRACTS_FINISHED", stripped);
+            return stripped;
         }
 
-        private static void StripContractSectionWithMissingParts(ConfigNode scenarioNode, string sectionName)
+        private static void StripContractSectionWithMissingParts(ConfigNode scenarioNode, string sectionName,
+            Dictionary<string, (string TypeName, string MissingAsset)> strippedOut)
         {
             var sectionNode = scenarioNode.GetNode(sectionName);
             if (sectionNode == null) return;
@@ -246,7 +258,11 @@ namespace LmpClient.Systems.Scenario
                 }
                 else
                 {
-                    LunaLog.LogWarning($"[ShareContracts]: Dropping contract {contractNode.GetValue("guid")} ({contractNode.GetValue("type")}) from {sectionName} — references part '{missingPart}' which is not installed on this client.");
+                    var guid = contractNode.GetValue("guid");
+                    var typeName = contractNode.GetValue("type") ?? "Unknown";
+                    LunaLog.LogWarning($"[ShareContracts]: Dropping contract {guid} ({typeName}) from {sectionName} — references part '{missingPart}' which is not installed on this client.");
+                    if (guid != null)
+                        strippedOut[guid] = (typeName, missingPart);
                 }
             }
         }
