@@ -202,6 +202,7 @@
     <Compile Include="Harmony\TourismContract_ClearKerbalsHard.cs" />
     <Compile Include="Harmony\TourismContract_ClearKerbalsSoft.cs" />
     <Compile Include="Harmony\UIPartActionButton_OnClick.cs" />
+    <Compile Include="Harmony\UIPlanetariumDateTime_SetTime.cs" />
     <Compile Include="Harmony\DebugScreen_OnGameSceneLoad.cs" />
     <Compile Include="Harmony\DebugToolbar_WindowCheats.cs" />
     <Compile Include="Harmony\DestructibleBuilding_OnCollisionEnter.cs" />
