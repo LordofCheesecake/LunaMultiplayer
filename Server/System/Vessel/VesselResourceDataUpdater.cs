@@ -1,5 +1,5 @@
 ﻿using LmpCommon.Message.Data.Vessel;
-using LunaConfigNode;
+using LunaConfigNode.CfgNode;
 using Server.Utilities;
 using System;
 using System.Collections.Concurrent;
