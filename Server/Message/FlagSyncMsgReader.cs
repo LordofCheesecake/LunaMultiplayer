@@ -17,8 +17,6 @@ namespace Server.Message
             {
                 case FlagMessageType.ListRequest:
                     FlagSystem.HandleFlagListRequestMessage(client);
-                    //We don't use this message anymore so we can recycle it
-                    message.Recycle();
                     break;
                 case FlagMessageType.FlagData:
                     FlagSystem.HandleFlagDataMessage(client, (FlagDataMsgData)data);

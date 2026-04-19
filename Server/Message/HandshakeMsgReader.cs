@@ -1,8 +1,8 @@
-﻿using System;
-using LmpCommon.Message.Data.Handshake;
+﻿using LmpCommon.Message.Data.Handshake;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
 using Server.Client;
+using Server.Log;
 using Server.Message.Base;
 using Server.System;
 
@@ -21,10 +21,9 @@ namespace Server.Message
                     HandshakeHandler.HandleHandshakeRequest(client, (HandshakeRequestMsgData)data);
                     break;
                 default:
-                    throw new NotImplementedException("Handshake type not implemented");
+                    LunaLog.Debug($"Ignoring handshake subtype {data?.HandshakeMessageType} from {client.PlayerName}");
+                    break;
             }
-
-            message.Recycle();
         }
     }
 }

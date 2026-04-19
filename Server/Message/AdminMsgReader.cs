@@ -34,7 +34,13 @@ namespace Server.Message
 
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
-            var messageData = (AdminBaseMsgData)message.Data;
+            var messageData = message.Data as AdminBaseMsgData;
+            if (messageData == null)
+            {
+                LunaLog.Debug($"Admin message from {client.PlayerName} ignored: missing AdminBaseMsgData payload");
+                return;
+            }
+
             var auth = FailureTracker.GetOrAdd(client.PlayerName ?? string.Empty, _ => new AdminAuthState());
 
             if (auth.LockoutUntilUtc > DateTime.UtcNow)
@@ -78,7 +84,9 @@ namespace Server.Message
                         msgData.Response = AdminResponse.Ok;
                         break;
                     default:
-                        throw new ArgumentOutOfRangeException();
+                        LunaLog.Debug($"Ignoring admin message subtype {messageData.AdminMessageType} from {client.PlayerName}");
+                        msgData.Response = AdminResponse.Error;
+                        break;
                 }
                 MessageQueuer.SendToClient<AdminSrvMsg>(client, msgData);
             }

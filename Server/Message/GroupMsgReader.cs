@@ -24,9 +24,6 @@ namespace Server.Message
                     msgData.Groups = GroupSystem.Groups.Values.ToArray();
                     msgData.GroupsCount = msgData.Groups.Length;
                     MessageQueuer.SendToClient<GroupSrvMsg>(client, msgData);
-
-                    //We don't use this message anymore so we can recycle it
-                    message.Recycle();
                     break;
                 case GroupMessageType.CreateGroup:
                     GroupSystem.CreateGroup(client.PlayerName, ((GroupCreateMsgData)data).GroupName);

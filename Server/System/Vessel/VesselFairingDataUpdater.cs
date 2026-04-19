@@ -28,7 +28,9 @@ namespace Server.System.Vessel
                     if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
 
                     var part = vessel.GetPart(msgData.PartFlightId);
-                    var module = part?.GetSingleModule("ModuleProceduralFairing");
+                    // GetFirstModule avoids the "Key value is not unique" throw if a part ever carries more
+                    // than one ModuleProceduralFairing entry; the fairing deploy state only needs one.
+                    var module = part?.GetFirstModule("ModuleProceduralFairing");
                     if (module != null)
                     {
                         module.Values.Update("fsm", "st_flight_deployed");

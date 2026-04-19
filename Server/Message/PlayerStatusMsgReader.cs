@@ -19,8 +19,6 @@ namespace Server.Message
             {
                 case PlayerStatusMessageType.Request:
                     SendOtherPlayerStatusesToNewPlayer(client);
-                    //We don't use this message anymore so we can recycle it
-                    message.Recycle();
                     break;
                 case PlayerStatusMessageType.Set:
                     var data = (PlayerStatusSetMsgData)messageData;

@@ -1,4 +1,5 @@
 ﻿using LmpCommon.Message.Data.Vessel;
+using LunaConfigNode;
 using Server.Utilities;
 using System;
 using System.Collections.Concurrent;
@@ -43,18 +44,38 @@ namespace Server.System.Vessel
                     {
                         if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
 
-                        foreach (var resource in msgData.Resources)
+                        // Resources is an array-pooled buffer whose Length may exceed ResourcesCount when a
+                        // previous message had more entries; iterate only the live slice and null-guard each
+                        // entry before dereferencing to avoid the NullReferenceException that was causing
+                        // partial proto-vessel writes (and downstream physics desync / explosions).
+                        var count = msgData.ResourcesCount;
+                        var resources = msgData.Resources;
+                        if (resources == null) return;
+                        if (count > resources.Length) count = resources.Length;
+
+                        for (var i = 0; i < count; i++)
                         {
+                            var resource = resources[i];
+                            if (resource == null || string.IsNullOrEmpty(resource.ResourceName)) continue;
+
                             var part = vessel.GetPart(resource.PartFlightId);
-                            if (part != null)
+                            if (part?.Resources == null) continue;
+
+                            // Resolve the first matching resource node. We avoid MixedCollection.GetSingle
+                            // because it throws on duplicate keys (legitimate for some modded parts) which
+                            // would abort the whole update and corrupt the proto-vessel snapshot on disk.
+                            ConfigNode resourceNode = null;
+                            foreach (var entry in part.Resources.GetAll())
                             {
-                                var resourceNode = part.Resources.GetSingle(resource.ResourceName).Value;
-                                if (resourceNode != null)
-                                {
-                                    resourceNode.UpdateValue("amount", resource.Amount.ToString(CultureInfo.InvariantCulture));
-                                    resourceNode.UpdateValue("flowState", resource.FlowState.ToString(CultureInfo.InvariantCulture));
-                                }
+                                if (entry.Key != resource.ResourceName) continue;
+                                resourceNode = entry.Value;
+                                break;
                             }
+
+                            if (resourceNode == null) continue;
+
+                            resourceNode.UpdateValue("amount", resource.Amount.ToString(CultureInfo.InvariantCulture));
+                            resourceNode.UpdateValue("flowState", resource.FlowState.ToString(CultureInfo.InvariantCulture));
                         }
                     }
                 });

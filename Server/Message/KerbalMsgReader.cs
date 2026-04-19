@@ -18,8 +18,6 @@ namespace Server.Message
             {
                 case KerbalMessageType.Request:
                     KerbalSystem.HandleKerbalsRequest(client);
-                    //We don't use this message anymore so we can recycle it
-                    message.Recycle();
                     break;
                 case KerbalMessageType.Proto:
                     KerbalSystem.HandleKerbalProto(client, (KerbalProtoMsgData)data);

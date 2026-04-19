@@ -35,11 +35,20 @@ namespace Server.Message
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
             var messageData = message.Data as VesselBaseMsgData;
-            switch (messageData?.VesselMessageType)
+            if (messageData == null)
+            {
+                // message.Data being null here means either the wrapper was served from the pool with a cleared
+                // payload (pool-state race — see central dispatch finally) or the incoming subtype could not be
+                // resolved to VesselBaseMsgData. Log with wrapper identity so we can tell the two apart.
+                LunaLog.Warning($"Vessel message from {client.PlayerName} had no VesselBaseMsgData payload " +
+                                $"(Data={(message.Data?.GetType().Name ?? "<null>")}, wrapperHash={message.GetHashCode():X}).");
+                return;
+            }
+
+            switch (messageData.VesselMessageType)
             {
                 case VesselMessageType.Sync:
                     HandleVesselsSync(client, messageData);
-                    message.Recycle();
                     break;
                 case VesselMessageType.Proto:
                     HandleVesselProto(client, messageData);
@@ -109,7 +118,7 @@ namespace Server.Message
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 default:
-                    LunaLog.Debug($"Ignoring vessel message subtype {messageData?.VesselMessageType} from {client.PlayerName}");
+                    LunaLog.Debug($"Ignoring vessel message subtype {messageData.VesselMessageType} from {client.PlayerName}");
                     break;
             }
         }

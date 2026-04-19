@@ -42,7 +42,9 @@ namespace Server.System.Vessel
             var part = vessel.GetPart(msgData.PartFlightId);
             if (part != null)
             {
-                var module = part.GetSingleModule(msgData.ModuleName);
+                // See VesselPartSyncFieldDataUpdater for the rationale behind GetFirstModule: duplicate
+                // module names in the part protovessel legitimately occur and must not abort this writer.
+                var module = part.GetFirstModule(msgData.ModuleName);
                 if (module != null)
                 {
                     switch (msgData.FieldType)

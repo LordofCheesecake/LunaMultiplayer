@@ -1,8 +1,8 @@
-﻿using System;
-using LmpCommon.Message.Data.CraftLibrary;
+﻿using LmpCommon.Message.Data.CraftLibrary;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
 using Server.Client;
+using Server.Log;
 using Server.Message.Base;
 using Server.System;
 
@@ -12,7 +12,12 @@ namespace Server.Message
     {
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
-            var data = (CraftLibraryBaseMsgData)message.Data;
+            var data = message.Data as CraftLibraryBaseMsgData;
+            if (data == null)
+            {
+                LunaLog.Debug($"CraftLibrary message from {client.PlayerName} ignored: missing CraftLibraryBaseMsgData payload");
+                return;
+            }
 
             switch (data.CraftMessageType)
             {
@@ -32,7 +37,8 @@ namespace Server.Message
                     CraftLibrarySystem.SaveCraft(client, (CraftLibraryDataMsgData)data);
                     break;
                 default:
-                    throw new ArgumentOutOfRangeException();
+                    LunaLog.Debug($"Ignoring craft library message subtype {data.CraftMessageType} from {client.PlayerName}");
+                    break;
             }
         }
     }

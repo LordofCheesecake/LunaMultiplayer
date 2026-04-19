@@ -14,9 +14,6 @@ namespace Server.Message
     {
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
-            //We don't use this message anymore so we can recycle it
-            message.Recycle();
-
             var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<SettingsReplyMsgData>();
             msgData.WarpMode = WarpSettings.SettingsStore.WarpMode;
             msgData.GameMode = GeneralSettings.SettingsStore.GameMode;

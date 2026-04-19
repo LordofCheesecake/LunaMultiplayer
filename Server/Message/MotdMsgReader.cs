@@ -14,9 +14,6 @@ namespace Server.Message
     {
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
-            //We don't use this message anymore so we can recycle it
-            message.Recycle();
-
             var newMotd = GeneralSettings.SettingsStore.ServerMotd;
 
             if (newMotd.Length > 255)

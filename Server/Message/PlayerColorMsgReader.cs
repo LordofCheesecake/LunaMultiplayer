@@ -20,9 +20,6 @@ namespace Server.Message
             {
                 case PlayerColorMessageType.Request:
                     SendAllPlayerColors(client);
-
-                    //We don't use this message anymore so we can recycle it
-                    message.Recycle();
                     break;
                 case PlayerColorMessageType.Set:
                     var data = (PlayerColorSetMsgData)messageData;

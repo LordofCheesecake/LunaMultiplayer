@@ -24,8 +24,6 @@ namespace Server.Message
             {
                 case LockMessageType.ListRequest:
                     LockSystemSender.SendAllLocks(client);
-                    //We don't use this message anymore so we can recycle it
-                    message.Recycle();
                     break;
                 case LockMessageType.Acquire:
                     var acquireData = (LockAcquireMsgData)data;

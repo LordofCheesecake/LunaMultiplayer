@@ -42,7 +42,11 @@ namespace Server.System.Vessel
             var part = vessel.GetPart(msgData.PartFlightId);
             if (part != null)
             {
-                var module = part.GetSingleModule(msgData.ModuleName);
+                // Use GetFirstModule to tolerate duplicate MODULE names (e.g. engines have multiple
+                // FXModuleThrottleEffects, one per thrust transform) which would otherwise throw
+                // "Key value is not unique" and abort the background writer, leaving the proto-vessel
+                // in a partially-updated state that downstream clients later read as corrupt.
+                var module = part.GetFirstModule(msgData.ModuleName);
                 if (module != null)
                 {
                     switch (msgData.FieldType)

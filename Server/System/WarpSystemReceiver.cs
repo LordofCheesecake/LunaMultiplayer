@@ -38,7 +38,8 @@ namespace Server.System
                 var latest = WarpContext.LatestSubspace;
                 if (latest != null && serverTimeDifference < latest.Time)
                 {
-                    LunaLog.Warning($"Rejecting subspace from {client.PlayerName}: offset {serverTimeDifference} earlier than current latest {latest.Time}");
+                    LunaLog.Warning($"Rejecting subspace from {client.PlayerName}: offset {serverTimeDifference} earlier than current latest {latest.Time}. Force-syncing to subspace {latest.Id}.");
+                    ForceSyncClientToSubspace(client, latest.Id);
                     return;
                 }
 
@@ -104,6 +105,32 @@ namespace Server.System
             {
                 WarpSystemSender.SendAllSubspaces(client);
             }
+        }
+
+        /// <summary>
+        /// Broadcasts a <see cref="WarpChangeSubspaceMsgData"/> placing <paramref name="client"/> on
+        /// <paramref name="subspaceId"/>. Used when the server rejects a NewSubspace that would jump backwards
+        /// in universe time: without this the offending client stays stuck on an older subspace, all other
+        /// clients continue rejecting its vessel stream, and vessels desync / explode.
+        /// </summary>
+        private static void ForceSyncClientToSubspace(ClientStructure client, int subspaceId)
+        {
+            if (client == null) return;
+
+            var oldSubspace = client.Subspace;
+            client.Subspace = subspaceId;
+
+            var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<WarpChangeSubspaceMsgData>();
+            msgData.PlayerName = client.PlayerName;
+            msgData.Subspace = subspaceId;
+
+            // Inform everyone (including the offending client) that this player is now on the authoritative
+            // subspace. Clients treat a ChangeSubspace targeting their own PlayerName as an authoritative sync.
+            MessageQueuer.SendToAllClients<WarpSrvMsg>(msgData);
+
+            // Try to remove the stale subspace if nobody is on it anymore (mirrors HandleChangeSubspace).
+            if (oldSubspace != subspaceId && oldSubspace >= 0)
+                WarpSystem.RemoveSubspace(oldSubspace);
         }
     }
 }

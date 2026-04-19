@@ -1,8 +1,8 @@
-﻿using System;
-using LmpCommon.Message.Data.Screenshot;
+﻿using LmpCommon.Message.Data.Screenshot;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
 using Server.Client;
+using Server.Log;
 using Server.Message.Base;
 using Server.System;
 
@@ -12,7 +12,13 @@ namespace Server.Message
     {
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
-            var data = (ScreenshotBaseMsgData)message.Data;
+            var data = message.Data as ScreenshotBaseMsgData;
+            if (data == null)
+            {
+                LunaLog.Debug($"Screenshot message from {client.PlayerName} ignored: missing ScreenshotBaseMsgData payload");
+                return;
+            }
+
             switch (data.ScreenshotMessageType)
             {
                 case ScreenshotMessageType.FoldersRequest:
@@ -28,7 +34,8 @@ namespace Server.Message
                     ScreenshotSystem.SendScreenshot(client, (ScreenshotDownloadRequestMsgData)data);
                     break;
                 default:
-                    throw new ArgumentOutOfRangeException();
+                    LunaLog.Debug($"Ignoring screenshot message subtype {data.ScreenshotMessageType} from {client.PlayerName}");
+                    break;
             }
         }
     }

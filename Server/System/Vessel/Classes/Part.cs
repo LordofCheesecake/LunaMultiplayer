@@ -34,6 +34,24 @@ namespace Server.System.Vessel.Classes
             return Modules.GetSingle(moduleName).Value;
         }
 
+        /// <summary>
+        /// Returns the first MODULE node matching <paramref name="moduleName"/>, or <c>null</c> when no such
+        /// module exists on this part. Tolerates duplicate module names (legitimate for KSP engines with
+        /// multiple <c>FXModuleThrottleEffects</c> / thrust transforms) which would cause
+        /// <see cref="GetSingleModule"/> to throw "Key value is not unique" and abort the background writer.
+        /// </summary>
+        public ConfigNode GetFirstModule(string moduleName)
+        {
+            if (string.IsNullOrEmpty(moduleName) || Modules == null) return null;
+
+            foreach (var module in Modules.GetAll())
+            {
+                if (module.Key == moduleName)
+                    return module.Value;
+            }
+            return null;
+        }
+
         public override string ToString()
         {
             var builder = new StringBuilder();

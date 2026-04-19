@@ -21,9 +21,6 @@ namespace Server.Message
                     ScenarioSystem.ParseReceivedScenarioData(client, messageData);
                     break;
             }
-
-            //We don't use this message anymore so we can recycle it
-            message.Recycle();
         }
     }
 }
