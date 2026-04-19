@@ -12,11 +12,22 @@ Install the following on your Windows machine:
 
 ## Step 1 — Clone the repository
 
+This fork includes the custom fixes and docs in this branch of the project:
+
+**https://github.com/LordofCheesecake/LunaMultiplayer**
+
 Open `cmd.exe` and run:
 
 ```bat
-git clone https://github.com/<your-fork>/LunaMultiplayer.git
+git clone https://github.com/LordofCheesecake/LunaMultiplayer.git
 cd LunaMultiplayer
+```
+
+If you already cloned it once and want the latest changes from this fork:
+
+```bat
+cd LunaMultiplayer
+git pull
 ```
 
 ---
