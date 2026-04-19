@@ -51,7 +51,7 @@
 
 Please check the [wiki](../../wiki) to see how to [install](../../wiki/How-to-install-LMP), [run](../../wiki/How-to-play-with-LMP), [build](../../wiki/How-to-compile-LMP) or [debug](../../wiki/Debugging-in-Visual-studio) LMP among other things.
 
-**This repository** also includes **[INSTALL.md](INSTALL.md)** (release vs. clone-and-build, including copying KSP DLLs into `External\KSPLibraries`) and **[BUILDING.md](BUILDING.md)** (detailed Windows build and manual copy table).
+**This repository** also includes **[INSTALL.md](INSTALL.md)** (copy-only install for players; building from source for developers; how maintainers ship a zip) and **[BUILDING.md](BUILDING.md)** (detailed Windows build and manual copy table).
 
 ---
 ### Troubleshooting:

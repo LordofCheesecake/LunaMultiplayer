@@ -1,139 +1,156 @@
 # Installing Luna Multiplayer (LMP)
 
-There are two ways to get the mod onto your PC:
+**Players do not need to build anything.** Download or receive a pre-built zip, extract it, and merge the `GameData` folder into your KSP install. Done.
 
-1. **Download a release** — fastest if you only want to play (no compiler needed).
-2. **Clone this repository and build** — for contributors, testers of the latest code, or custom forks.
+Building from source is only for developers or anyone producing the zip for others.
 
-The game server is separate from the KSP mod. See [SERVER_SETUP.md](SERVER_SETUP.md) to run a server on Windows, Mac, or Raspberry Pi.
-
----
-
-## Option A — Install from a release (recommended for players)
-
-1. Download the latest **LMP release** for your KSP version from the project’s [GitHub Releases](https://github.com/LunaMultiplayer/LunaMultiplayer/releases) page (or your fork’s releases, if you use one).
-2. Extract the archive.
-3. Copy the extracted folders into your KSP installation so you end up with:
-   - `…\Kerbal Space Program\GameData\LunaMultiplayer\`
-   - `…\Kerbal Space Program\GameData\000_Harmony\` (Harmony is required)
-
-Exact layout matches the official wiki: [How to install LMP](https://github.com/LunaMultiplayer/LunaMultiplayer/wiki/How-to-install-LMP).
-
-You do **not** need Git or the .NET SDK for this path.
+The dedicated server is separate from the KSP mod. See [SERVER_SETUP.md](SERVER_SETUP.md).
 
 ---
 
-## Option B — Install after cloning and building this repository (Windows)
+## Player install (copy only — no compiler needed)
 
-Use this when you are working from a **git clone** of the source tree and want the mod files generated on your machine.
+1. Download `LunaMultiplayer-x.y.z.zip` — see [Where to get a build](#where-to-get-a-build) below.
+2. Extract the zip. Inside you will find a `GameData` folder.
+3. Copy the contents of that `GameData` folder into your KSP `GameData` folder, so you end up with:
+   - `...\Kerbal Space Program\GameData\LunaMultiplayer\`
+   - `...\Kerbal Space Program\GameData\000_Harmony\`
+4. Start KSP. You should see `[LMP]` in `KSP.log` and the LMP toolbar button.
 
-### 1. Prerequisites
+No Git, no .NET SDK, no Visual Studio.
 
-Install on Windows:
+---
 
-| Requirement | Why |
-|-------------|-----|
-| **[.NET SDK 10.x](https://dotnet.microsoft.com/download/dotnet/10.0)** | Required by `global.json` and the shared libraries (`LmpCommon` targets `net10.0`). |
-| **[.NET Framework 4.7.2 Developer Pack](https://dotnet.microsoft.com/download/dotnet-framework/net472)** | Reference assemblies for the KSP mod (`LmpClient` targets `net472`). |
-| **Git for Windows** | To clone and update the repo. |
+## Where to get a build
 
-Optional: [GitHub Desktop](https://desktop.github.com/) if you prefer a GUI over the command line.
+| Source | Steps |
+|--------|-------|
+| **[GitHub Releases](../../releases)** | Go to the Releases page, download the latest `LunaMultiplayer-x.y.z.zip`, extract, merge `GameData` into your KSP folder. |
+| **GitHub Actions artifact** | Every push to `main` builds a zip automatically. Go to the [Actions tab](../../actions), open the latest **Build & Release LMP Client** run, scroll to **Artifacts**, download. |
+| **Zip from a maintainer** | A maintainer runs `Scripts\package.ps1` locally (see below) and shares the zip file. |
 
-### 2. Clone the repository
+---
 
-```bat
-git clone https://github.com/YOUR_ACCOUNT_OR_UPSTREAM/LunaMultiplayer.git
-cd LunaMultiplayer
-git pull
+## For maintainers — producing the zip
+
+The repo ships two packaging tools so only one person needs the toolchain.
+
+### Option 1 — Local (PowerShell)
+
+After building the client (see [Build from source](#build-from-source-developers-only)):
+
+```powershell
+.\Scripts\package.ps1
 ```
 
-Use the URL of **this** fork or the upstream repo you actually track.
+Writes `dist\LunaMultiplayer-x.y.z.zip` with the correct `GameData` tree. Share that file with players.
 
-### 3. KSP library DLLs (`External\KSPLibraries`)
+### Option 2 — GitHub Actions (automated, recommended)
 
-The client project references Unity / KSP assemblies that **cannot** be redistributed in clear form in a public repo. The tree therefore includes `External\KSPLibraries\KSPLibraries.7z`, which is **password-protected** (used by automated builds). **You do not need the password** for a local build.
+`.github\workflows\release.yml` runs on every push to `main` and every `v*` tag:
 
-Copy these files from **your installed KSP** into `External\KSPLibraries\` (same folder as the `.7z`), overwriting nothing else:
+- Builds `LmpClient` on a Windows runner (.NET Framework 4.7.2 reference assemblies are pre-installed).
+- Extracts `External\KSPLibraries\KSPLibraries.7z` using a **GitHub Secret** for the password.
+- Runs `Scripts\package.ps1` and uploads the zip as a workflow artifact.
+- On a `v*` tag, also attaches the zip to a GitHub Release automatically.
 
-**Source folder on disk:**  
-`<Your KSP>\KSP_x64_Data\Managed\`
+**One-time secret setup:** in your fork, go to **Settings > Secrets and variables > Actions > New repository secret**, name it `KSP_LIBS_PASSWORD`, and paste the archive password.
 
-**Files to copy (names must match exactly):**
+After that: push to `main` or push a `v0.29.3` tag and the zip appears in the Actions run (and on the Releases page for tags) for anyone to download.
 
-- `Assembly-CSharp.dll`
-- `System.dll`
-- `System.Xml.dll`
-- `UnityEngine.dll`
-- `UnityEngine.AnimationModule.dll`
-- `UnityEngine.CoreModule.dll`
-- `UnityEngine.ImageConversionModule.dll`
-- `UnityEngine.IMGUIModule.dll`
-- `UnityEngine.InputLegacyModule.dll`
-- `UnityEngine.PhysicsModule.dll`
-- `UnityEngine.TextRenderingModule.dll`
-- `UnityEngine.UI.dll`
-- `UnityEngine.UnityWebRequestModule.dll`
+---
 
-Use the **same KSP version** you play with; mismatched assemblies can cause subtle load or runtime issues.
+## Build from source (developers only)
 
-### 4. Point the copy script at your KSP folder (optional but convenient)
+Use this when you are changing code or need to produce a new zip yourself.
 
-Edit `Scripts\SetDirectories.bat` and set:
+### Prerequisites
+
+| Requirement | Download |
+|-------------|----------|
+| .NET SDK 10.x | [dotnet.microsoft.com/download/dotnet/10.0](https://dotnet.microsoft.com/download/dotnet/10.0) |
+| .NET Framework 4.7.2 Developer Pack | [dotnet.microsoft.com/download/dotnet-framework/net472](https://dotnet.microsoft.com/download/dotnet-framework/net472) |
+| Git for Windows | [git-scm.com](https://git-scm.com/download/win) |
+
+### Clone
+
+```bat
+git clone https://github.com/YOUR_FORK/LunaMultiplayer.git
+cd LunaMultiplayer
+```
+
+### KSP library DLLs
+
+`External\KSPLibraries\KSPLibraries.7z` is password-protected (used by CI). For a local build, copy these files from your KSP installation directly:
+
+**Source:** `<KSP install>\KSP_x64_Data\Managed\`  
+**Destination:** `External\KSPLibraries\`
+
+Files to copy:
+
+```
+Assembly-CSharp.dll      System.dll               System.Xml.dll
+UnityEngine.dll          UnityEngine.AnimationModule.dll
+UnityEngine.CoreModule.dll     UnityEngine.ImageConversionModule.dll
+UnityEngine.IMGUIModule.dll    UnityEngine.InputLegacyModule.dll
+UnityEngine.PhysicsModule.dll  UnityEngine.TextRenderingModule.dll
+UnityEngine.UI.dll             UnityEngine.UnityWebRequestModule.dll
+```
+
+Use the same KSP version you play with.
+
+### Set your KSP path
+
+Edit `Scripts\SetDirectories.bat`:
 
 ```bat
 SET KSPPATH=C:\Path\To\Kerbal Space Program
 ```
 
-Use your real install path (Steam library paths vary). This file is meant to stay local and is not committed in a way that shares your path with others.
+Must be an active `SET` (not commented with `::`). Use the folder that contains `KSP_x64.exe`.
 
-### 5. Build and install the mod
+### Build and install into GameData
 
-From the **repository root**, in **cmd.exe** (not PowerShell), run:
-
-```bat
-Scripts\build-lmp-projects.bat --release
-```
-
-Or for a Debug build (needed if you rely on the post-build copy step in the client project):
+From the **repository root** in **cmd.exe** (not PowerShell):
 
 ```bat
-Scripts\build-lmp-projects.bat --debug
+dotnet build LmpClient\LmpClient.csproj -c Debug
 ```
 
-**Automatic copy into `GameData`:**  
-If `KSPPATH` is set, the **Debug** configuration runs the post-build step that copies the mod into your KSP tree. For **Release**, either:
+The Debug configuration runs `Scripts\CopyToKSPDirectory.bat` after the build, which copies everything (DLLs, Harmony, all assets) into your KSP `GameData` folder automatically.
 
-- Run the copy script after a Debug build:  
-  `Scripts\CopyToKSPDirectory.bat`  
-  (it copies from `LmpClient\bin\Debug\` — see script), **or**
-- Copy files manually as described in [BUILDING.md](BUILDING.md) under “Step 4 — Copy files to KSP”.
+To just recopy without rebuilding:
 
-### 6. Verify
+```bat
+Scripts\CopyToKSPDirectory.bat
+```
 
-Start KSP. You should see `[LMP]` lines in `KSP.log` and the LMP button in the UI. If the mod fails to load, check [BUILDING.md](BUILDING.md) “Step 5 — Verify the install” and the [troubleshooting wiki](https://github.com/LunaMultiplayer/LunaMultiplayer/wiki/Troubleshooting).
+### Produce a zip for distribution
+
+```powershell
+.\Scripts\package.ps1
+```
+
+Output: `dist\LunaMultiplayer-x.y.z.zip` — share this with players.
 
 ---
 
-## Quick reference — what ends up in `GameData`
+## Quick reference — what belongs in GameData
 
-Whether you copy from a release zip or from your own build, a correct install includes at least:
+| Path under GameData | Contents |
+|---------------------|----------|
+| `LunaMultiplayer\Plugins\` | LMP DLLs and dependencies |
+| `000_Harmony\` | Harmony patcher |
+| `LunaMultiplayer\Button\` | Toolbar button icon |
+| `LunaMultiplayer\Localization\` | Language files |
+| `LunaMultiplayer\PartSync\` | Part module sync definitions |
+| `LunaMultiplayer\Icons\` | UI icons |
+| `LunaMultiplayer\Flags\` | LMP flags |
 
-| Location under `GameData` | Contents |
-|---------------------------|----------|
-| `LunaMultiplayer\Plugins\` | LMP and dependency DLLs |
-| `000_Harmony\` | Harmony (`0Harmony.dll`, etc.) |
-| `LunaMultiplayer\Button\`, `Localization\`, `PartSync\`, `Icons\`, `Flags\` | Assets from the client tree |
-
-The full manual mapping from repo paths is in [BUILDING.md](BUILDING.md).
+Full repo-to-GameData mapping: [BUILDING.md](BUILDING.md).
 
 ---
 
-## Building only the dedicated server
+## Server
 
-The server does not go inside KSP. After a successful build:
-
-```bat
-dotnet build Server\Server.csproj -c Release
-```
-
-Run `Server.exe` from `Server\bin\Release\net10.0\`. Details: [SERVER_SETUP.md](SERVER_SETUP.md).
+The server is a standalone console app — it does not go inside KSP. See [SERVER_SETUP.md](SERVER_SETUP.md) for Windows (with and without Docker), Mac, and Raspberry Pi instructions.

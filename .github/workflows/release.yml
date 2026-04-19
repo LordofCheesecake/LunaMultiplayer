@@ -1,0 +1,57 @@
+name: Build & Release LMP Client
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-client:
+    name: Build LmpClient and package mod
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 10.0.x
+
+      # .NET Framework 4.7.2 reference assemblies are pre-installed on windows-latest.
+      # Extract the KSP/Unity DLLs that LmpClient.csproj references from the
+      # password-protected archive. Store the password in Settings > Secrets as
+      # KSP_LIBS_PASSWORD.
+      - name: Extract KSP library stubs
+        env:
+          KSP_LIBS_PASSWORD: ${{ secrets.KSP_LIBS_PASSWORD }}
+        run: |
+          7z x External\KSPLibraries\KSPLibraries.7z -oExternal\KSPLibraries\ -p"$env:KSP_LIBS_PASSWORD" -y
+
+      - name: Restore
+        run: dotnet restore LmpClient\LmpClient.csproj
+
+      - name: Build (Release)
+        run: dotnet build LmpClient\LmpClient.csproj -c Release --no-restore
+
+      - name: Package mod zip
+        run: |
+          .\Scripts\package.ps1 -Configuration Release -OutputDir dist
+
+      - name: Upload artifact (every push/PR)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LunaMultiplayer-${{ github.sha }}
+          path: dist\*.zip
+          if-no-files-found: error
+
+      # Attach zip to a GitHub Release when a v* tag is pushed
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist\*.zip
+          generate_release_notes: true

@@ -1,6 +1,8 @@
 # Building and Installing LMP on Windows
 
-For a full overview (installing from a release zip vs. cloning this repo, and populating `External\KSPLibraries` without the password-protected archive), see **[INSTALL.md](INSTALL.md)**.
+**Players** who only need files to drop into `GameData` should follow **[INSTALL.md](INSTALL.md)** (copy-only — no SDK). This document is for **compiling** the mod on Windows.
+
+For a full overview (release zip vs. clone, and populating `External\KSPLibraries` without the password-protected archive), see **[INSTALL.md](INSTALL.md)**.
 
 ## Prerequisites
 
