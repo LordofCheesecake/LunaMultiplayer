@@ -23,23 +23,16 @@ namespace Server.System
             {
                 if (message.PlayerCreator != client.PlayerName) return;
 
-                // Reject NaN/Infinity and values outside reasonable bounds.
+                // Reject NaN/Infinity and values outside reasonable bounds. Do NOT reject "earlier than latest"
+                // subspaces: stock LMP clients legitimately create subspaces behind the latest (e.g. on reconnect,
+                // save-load, or when joining a game where another player has warped ahead), and force-syncing them
+                // away from their own timeline prevents both peers from ever sharing a subspace.
                 var serverTimeDifference = message.ServerTimeDifference;
                 if (double.IsNaN(serverTimeDifference) || double.IsInfinity(serverTimeDifference) ||
                     serverTimeDifference < MinServerTimeDifferenceSeconds ||
                     serverTimeDifference > MaxServerTimeDifferenceSeconds)
                 {
                     LunaLog.Warning($"Rejecting subspace from {client.PlayerName}: ServerTimeDifference {serverTimeDifference} out of range");
-                    return;
-                }
-
-                // Reject subspace that claims to be earlier than the current latest subspace; subspaces are meant to
-                // represent advancement in universe time, not jumps backward into "the shared past".
-                var latest = WarpContext.LatestSubspace;
-                if (latest != null && serverTimeDifference < latest.Time)
-                {
-                    LunaLog.Warning($"Rejecting subspace from {client.PlayerName}: offset {serverTimeDifference} earlier than current latest {latest.Time}. Force-syncing to subspace {latest.Id}.");
-                    ForceSyncClientToSubspace(client, latest.Id);
                     return;
                 }
 
@@ -105,32 +98,6 @@ namespace Server.System
             {
                 WarpSystemSender.SendAllSubspaces(client);
             }
-        }
-
-        /// <summary>
-        /// Broadcasts a <see cref="WarpChangeSubspaceMsgData"/> placing <paramref name="client"/> on
-        /// <paramref name="subspaceId"/>. Used when the server rejects a NewSubspace that would jump backwards
-        /// in universe time: without this the offending client stays stuck on an older subspace, all other
-        /// clients continue rejecting its vessel stream, and vessels desync / explode.
-        /// </summary>
-        private static void ForceSyncClientToSubspace(ClientStructure client, int subspaceId)
-        {
-            if (client == null) return;
-
-            var oldSubspace = client.Subspace;
-            client.Subspace = subspaceId;
-
-            var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<WarpChangeSubspaceMsgData>();
-            msgData.PlayerName = client.PlayerName;
-            msgData.Subspace = subspaceId;
-
-            // Inform everyone (including the offending client) that this player is now on the authoritative
-            // subspace. Clients treat a ChangeSubspace targeting their own PlayerName as an authoritative sync.
-            MessageQueuer.SendToAllClients<WarpSrvMsg>(msgData);
-
-            // Try to remove the stale subspace if nobody is on it anymore (mirrors HandleChangeSubspace).
-            if (oldSubspace != subspaceId && oldSubspace >= 0)
-                WarpSystem.RemoveSubspace(oldSubspace);
         }
     }
 }
