@@ -25,7 +25,20 @@ namespace LmpClient.VesselUtilities
     /// </summary>
     public class VesselCommon
     {
-        public static float PositionAndFlightStateMessageOffsetSec(float targetPingSec) => Mathf.Clamp(NetworkStatistics.PingSec + targetPingSec, 0.250f, 2.5f);
+        // Playback buffer floor: how far behind the latest received packet we render a remote vessel.
+        // When peers are loaded nearby we can safely park ~100 ms behind (2 packets of lead at 20 Hz
+        // which tolerates a single dropped UnreliableSequenced packet) for a near-realtime feel.
+        // When peers are far we fall back to the historical 250 ms floor to absorb the wider jitter
+        // typical of secondary-cadence streams.
+        private const float NearbyOffsetFloorSec = 0.100f;
+        private const float FarOffsetFloorSec = 0.250f;
+        private const float OffsetCeilingSec = 2.5f;
+
+        public static float PositionAndFlightStateMessageOffsetSec(float targetPingSec)
+        {
+            var floor = PlayerVesselsNearby() ? NearbyOffsetFloorSec : FarOffsetFloorSec;
+            return Mathf.Clamp(NetworkStatistics.PingSec + targetPingSec, floor, OffsetCeilingSec);
+        }
 
         public static bool UpdateIsForOwnVessel(Guid vesselId)
         {

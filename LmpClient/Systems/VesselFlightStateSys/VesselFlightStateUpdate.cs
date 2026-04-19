@@ -14,7 +14,18 @@ namespace LmpClient.Systems.VesselFlightStateSys
     {
         #region Fields
 
-        public VesselFlightStateUpdate Target { get; set; }
+        private VesselFlightStateUpdate _target;
+        public VesselFlightStateUpdate Target
+        {
+            get => _target;
+            set
+            {
+                // When the target is cleared (warp stop, subspace shuffle) the EMA of TimeDifference
+                // becomes stale - reseed so the next post-reset packet is taken as ground truth.
+                if (value == null) _smoothedTimeDifferenceSeeded = false;
+                _target = value;
+            }
+        }
 
         #region Message Fields
 
@@ -29,13 +40,23 @@ namespace LmpClient.Systems.VesselFlightStateSys
 
         #region Interpolation fields
 
+        // Cadence-aware cap: use max(primary, secondary) * 3 so the flight-state interpolator keeps
+        // advancing when a single packet is delayed, instead of freezing on the SECONDARY interval
+        // even while the sender is running primary cadence. See VesselPositionUpdate for rationale.
         private double MaxInterpolationDuration => WarpSystem.Singleton.SubspaceIsEqualOrInThePast(Target.SubspaceId) ?
-            TimeSpan.FromMilliseconds(SettingsSystem.ServerSettings.SecondaryVesselUpdatesMsInterval).TotalSeconds * 2
+            TimeSpan.FromMilliseconds(Math.Max(SettingsSystem.ServerSettings.VesselUpdatesMsInterval,
+                SettingsSystem.ServerSettings.SecondaryVesselUpdatesMsInterval)).TotalSeconds * 3
             : double.MaxValue;
 
         private int MessageCount => VesselFlightStateSystem.TargetFlightStateQueue.TryGetValue(VesselId, out var queue) ? queue.Count : 0;
         public double TimeDifference { get; private set; }
         public double ExtraInterpolationTime { get; private set; }
+
+        // EMA smoothing of TimeDifference - see VesselPositionUpdate for rationale. Same alpha so
+        // the two interpolators react to ping jitter on the same time scale.
+        private const double TimeDifferenceEmaAlpha = 0.25;
+        private double _smoothedTimeDifference;
+        private bool _smoothedTimeDifferenceSeeded;
         public bool InterpolationFinished => Target == null || LerpPercentage >= 1;
 
         public double InterpolationDuration => LunaMath.Clamp(Target.GameTimeStamp - GameTimeStamp + ExtraInterpolationTime, 0, MaxInterpolationDuration);
@@ -130,10 +151,23 @@ namespace LmpClient.Systems.VesselFlightStateSys
             if (Target == null) return InterpolatedCtrlState;
 
             InterpolatedCtrlState.Lerp(CtrlState, Target.CtrlState, LerpPercentage);
-            LerpPercentage += (float)(Time.fixedDeltaTime / InterpolationDuration);
+
+            // Tail-coast: if we're in the last 20% of the current interpolation window and no next
+            // packet is queued, halve the advancement speed so a dropped/late packet doesn't freeze
+            // throttle/pitch/yaw at Target until the following packet arrives (which was the origin
+            // of the per-second-feeling control wobble observers saw on thrusting vessels).
+            var step = (float)(Time.fixedDeltaTime / InterpolationDuration);
+            if (LerpPercentage >= TailCoastFractionThreshold && LerpPercentage < 1f && MessageCount == 0)
+            {
+                step *= TailCoastStepScale;
+            }
+            LerpPercentage += step;
 
             return InterpolatedCtrlState;
         }
+
+        private const float TailCoastFractionThreshold = 0.80f;
+        private const float TailCoastStepScale = 0.5f;
 
         /// <summary>
         /// This method adjust the extra interpolation duration in case we are lagging or too advanced.
@@ -142,7 +176,19 @@ namespace LmpClient.Systems.VesselFlightStateSys
         /// </summary>
         public void AdjustExtraInterpolationTimes()
         {
-            TimeDifference = TimeSyncSystem.UniversalTime - GameTimeStamp - VesselCommon.PositionAndFlightStateMessageOffsetSec(PingSec);
+            var rawTimeDifference = TimeSyncSystem.UniversalTime - GameTimeStamp - VesselCommon.PositionAndFlightStateMessageOffsetSec(PingSec);
+
+            if (!_smoothedTimeDifferenceSeeded)
+            {
+                _smoothedTimeDifference = rawTimeDifference;
+                _smoothedTimeDifferenceSeeded = true;
+            }
+            else
+            {
+                _smoothedTimeDifference = _smoothedTimeDifference * (1 - TimeDifferenceEmaAlpha) + rawTimeDifference * TimeDifferenceEmaAlpha;
+            }
+
+            TimeDifference = _smoothedTimeDifference;
 
             if (WarpSystem.Singleton.CurrentlyWarping || SubspaceId == -1)
             {

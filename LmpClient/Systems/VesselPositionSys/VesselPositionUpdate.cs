@@ -32,7 +32,19 @@ namespace LmpClient.Systems.VesselPositionSys
 
         public CelestialBody Body => GetBody(BodyIndex);
 
-        public VesselPositionUpdate Target { get; set; }
+        private VesselPositionUpdate _target;
+        public VesselPositionUpdate Target
+        {
+            get => _target;
+            set
+            {
+                // When the target is cleared (warp stop, subspace shuffle) we lose continuity with the
+                // previous time-difference samples - reseed the EMA so the first post-reset packet is
+                // taken as ground truth rather than being blended against a stale mean.
+                if (value == null) _smoothedTimeDifferenceSeeded = false;
+                _target = value;
+            }
+        }
 
         #region Message Fields
 
@@ -65,13 +77,28 @@ namespace LmpClient.Systems.VesselPositionSys
 
         #region Interpolation fields
 
+        // "How late is too late" between packets. Sizing this off the SECONDARY interval made the
+        // interpolator collapse as soon as a packet was >300 ms late even when the sender was running
+        // at the primary 50 ms cadence (a single dropped UnreliableSequenced packet was enough to
+        // produce a visible tick). Using max(primary, secondary) * 3 gives a cadence-aware tolerance
+        // that matches whichever stream the peer is actually producing without overshooting.
         private double MaxInterpolationDuration => WarpSystem.Singleton.SubspaceIsEqualOrInThePast(Target.SubspaceId) ?
-            TimeSpan.FromMilliseconds(SettingsSystem.ServerSettings.SecondaryVesselUpdatesMsInterval).TotalSeconds * 2
+            TimeSpan.FromMilliseconds(Math.Max(SettingsSystem.ServerSettings.VesselUpdatesMsInterval,
+                SettingsSystem.ServerSettings.SecondaryVesselUpdatesMsInterval)).TotalSeconds * 3
             : double.MaxValue;
 
         private int MessageCount => VesselPositionSystem.TargetVesselUpdateQueue.TryGetValue(VesselId, out var queue) ? queue.Count : 0;
         public double TimeDifference { get; private set; }
         public double ExtraInterpolationTime { get; private set; }
+
+        // EMA smoothing of TimeDifference to damp the per-packet wobble caused by ping variance.
+        // Without this the sign of ExtraInterpolationTime flips on nearly every packet when ping
+        // jitters across the "expected lag" boundary, producing visible back-and-forth wobble.
+        // Alpha 0.25 = short-ish memory (~effective window of 4 packets) so real drift still gets
+        // corrected quickly while single-packet ping spikes are absorbed.
+        private const double TimeDifferenceEmaAlpha = 0.25;
+        private double _smoothedTimeDifference;
+        private bool _smoothedTimeDifferenceSeeded;
         public bool InterpolationFinished => Target == null || CurrentFrame >= NumFrames;
 
         public double InterpolationDuration => LunaMath.Clamp(Target.GameTimeStamp - GameTimeStamp + ExtraInterpolationTime, 0, MaxInterpolationDuration);
@@ -176,6 +203,15 @@ namespace LmpClient.Systems.VesselPositionSys
             Vessel.SetVesselPosition(this, Target, LerpPercentage);
         }
 
+        // Fraction of NumFrames at which we enter the "tail" zone: once CurrentFrame is past this
+        // fraction of the total interpolation window AND the target queue is empty, we halve the
+        // frame advancement so the tail visually stretches out to cover a late/dropped packet.
+        // This eliminates the "hold at Target" freeze that produced per-second-feeling jitter
+        // without the snap-back risk of raw extrapolation (extrapolating past the target and then
+        // dequeuing the next packet would reset LerpPercentage to 0 and cause a visible rewind).
+        private const float TailCoastFractionThreshold = 0.80f;
+        private const float TailCoastFrameStep = 0.5f;
+
         /// <summary>
         /// Call this method to apply a vessel update using interpolation and advance the frame count
         /// </summary>
@@ -192,7 +228,20 @@ namespace LmpClient.Systems.VesselPositionSys
             }
             finally
             {
-                CurrentFrame++;
+                // If we're approaching the end of the current segment AND no next packet is waiting,
+                // slow down the tail so a single dropped UnreliableSequenced packet does not freeze
+                // the vessel at Target until the following packet arrives.
+                if (Target != null && NumFrames > 0
+                    && CurrentFrame >= NumFrames * TailCoastFractionThreshold
+                    && CurrentFrame < NumFrames
+                    && MessageCount == 0)
+                {
+                    CurrentFrame += TailCoastFrameStep;
+                }
+                else
+                {
+                    CurrentFrame++;
+                }
             }
         }
 
@@ -287,7 +336,19 @@ namespace LmpClient.Systems.VesselPositionSys
         /// </summary>
         public void AdjustExtraInterpolationTimes()
         {
-            TimeDifference = TimeSyncSystem.UniversalTime - GameTimeStamp - VesselCommon.PositionAndFlightStateMessageOffsetSec(PingSec);
+            var rawTimeDifference = TimeSyncSystem.UniversalTime - GameTimeStamp - VesselCommon.PositionAndFlightStateMessageOffsetSec(PingSec);
+
+            if (!_smoothedTimeDifferenceSeeded)
+            {
+                _smoothedTimeDifference = rawTimeDifference;
+                _smoothedTimeDifferenceSeeded = true;
+            }
+            else
+            {
+                _smoothedTimeDifference = _smoothedTimeDifference * (1 - TimeDifferenceEmaAlpha) + rawTimeDifference * TimeDifferenceEmaAlpha;
+            }
+
+            TimeDifference = _smoothedTimeDifference;
 
             if (WarpSystem.Singleton.CurrentlyWarping || SubspaceId == -1)
             {

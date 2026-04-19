@@ -21,11 +21,22 @@ namespace LmpClient.Systems.VesselPositionSys
 
         private static DateTime LastVesselUpdatesSentTime { get; set; } = LunaComputerTime.UtcNow;
 
-        private static int UpdateIntervalLockedToUnity => (int)(Math.Floor(SettingsSystem.ServerSettings.VesselUpdatesMsInterval
-            / TimeSpan.FromSeconds(Time.fixedDeltaTime).TotalMilliseconds) * TimeSpan.FromSeconds(Time.fixedDeltaTime).TotalMilliseconds);
+        // Round the configured interval down to a multiple of the physics fixed-delta so sends align
+        // with FixedUpdate ticks, but NEVER drop below a single fixedDeltaTime - if an operator sets
+        // an interval below one physics tick (e.g. 10 ms on default 20 ms physics) the naive floor
+        // produces 0, causing sends on every frame (CPU/bandwidth spike) and division-by-zero risk
+        // downstream in interpolation math. One physics tick is the true floor of what can be sampled.
+        private static int LockIntervalToPhysicsTick(int configuredMs)
+        {
+            var tickMs = TimeSpan.FromSeconds(Time.fixedDeltaTime).TotalMilliseconds;
+            if (tickMs <= 0) return configuredMs;
+            var aligned = (int)(Math.Floor(configuredMs / tickMs) * tickMs);
+            return Math.Max(aligned, (int)Math.Ceiling(tickMs));
+        }
 
-        private static int SecondaryVesselUpdatesUpdateIntervalLockedToUnity => (int)(Math.Floor(SettingsSystem.ServerSettings.SecondaryVesselUpdatesMsInterval
-            / TimeSpan.FromSeconds(Time.fixedDeltaTime).TotalMilliseconds) * TimeSpan.FromSeconds(Time.fixedDeltaTime).TotalMilliseconds);
+        private static int UpdateIntervalLockedToUnity => LockIntervalToPhysicsTick(SettingsSystem.ServerSettings.VesselUpdatesMsInterval);
+
+        private static int SecondaryVesselUpdatesUpdateIntervalLockedToUnity => LockIntervalToPhysicsTick(SettingsSystem.ServerSettings.SecondaryVesselUpdatesMsInterval);
 
         private static bool TimeToSendVesselUpdate => VesselCommon.PlayerVesselsNearby() ?
             (LunaComputerTime.UtcNow - LastVesselUpdatesSentTime).TotalMilliseconds > UpdateIntervalLockedToUnity :

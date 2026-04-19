@@ -12,7 +12,7 @@ namespace Server.Settings.Definition
 
         [XmlComment(Value = "Interval in ms at which the client will send POSITION and FLIGHTSTATE updates for vessels that are uncontrolled and nearby them. " +
                             "This interval is also applied used to send position updates of HIS OWN vessel when NOBODY is around")]
-        public int SecondaryVesselUpdatesMsInterval { get; set; } = 150;
+        public int SecondaryVesselUpdatesMsInterval { get; set; } = 80;
 
         [XmlComment(Value = "Send/Receive tick clock. Keep this value low but at least above 2ms to avoid extreme CPU usage.")]
         public int SendReceiveThreadTickMs { get; set; } = 5;
