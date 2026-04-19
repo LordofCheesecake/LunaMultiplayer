@@ -10,6 +10,7 @@ using Server.Log;
 using Server.Settings.Structures;
 using Server.Utilities;
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
@@ -78,7 +79,8 @@ namespace Server.Server
             {
                 ServerContext.Config.SimulatedLoss = DebugSettings.SettingsStore.SimulatedLossChance / 100f;
             }
-            if (DebugSettings.SettingsStore?.SimulatedDuplicatesChance < 100 && DebugSettings.SettingsStore?.SimulatedLossChance > 0)
+            // Previously this branch incorrectly compared SimulatedLossChance again instead of SimulatedDuplicatesChance.
+            if (DebugSettings.SettingsStore?.SimulatedDuplicatesChance < 100 && DebugSettings.SettingsStore?.SimulatedDuplicatesChance > 0)
             {
                 ServerContext.Config.SimulatedDuplicatesChance = DebugSettings.SettingsStore.SimulatedDuplicatesChance / 100f;
             }
@@ -200,6 +202,44 @@ namespace Server.Server
             client.BytesSent += outmsg.LengthBytes;
 
             var sendResult = Server.SendMessage(outmsg, client.Connection, message.NetDeliveryMethod, message.Channel);
+            if (sendResult == NetSendResult.FailedNotConnected || sendResult == NetSendResult.Dropped)
+            {
+                // Surface send failures instead of silently discarding. Most commonly FailedNotConnected when the
+                // client is mid-teardown - benign but useful to correlate with other logs during incidents.
+                LunaLog.NetworkDebug($"SendMessageToClient: {sendResult} to {client.PlayerName}");
+            }
+        }
+
+        /// <summary>
+        /// Broadcast a pre-built <paramref name="message"/> to a list of recipients. Serializes once into a
+        /// single <see cref="NetOutgoingMessage"/> (not N times) and lets Lidgren fan out the bytes. The caller
+        /// is responsible for recycling the <see cref="IServerMessageBase"/> wrapper and its <see cref="IMessageData"/>
+        /// after this returns - Lidgren owns the outgoing byte buffer by then so it is safe to do so.
+        /// Returns the number of recipients the message was successfully queued for.
+        /// </summary>
+        public static int BroadcastMessage(IList<NetConnection> recipients, IServerMessageBase message)
+        {
+            if (recipients == null || recipients.Count == 0 || message?.Data == null) return 0;
+
+            var outmsg = Server.CreateMessage(message.GetMessageSize());
+            message.Data.SentTime = LunaNetworkTime.UtcNow.Ticks;
+            message.Serialize(outmsg);
+
+            // IList<NetConnection> overload: Lidgren validates/clones as needed and sends once per recipient.
+            Server.SendMessage(outmsg, recipients, message.NetDeliveryMethod, message.Channel);
+
+            var nowMs = ServerContext.ServerClock.ElapsedMilliseconds;
+            var byteCount = outmsg.LengthBytes;
+            for (var i = 0; i < recipients.Count; i++)
+            {
+                if (ServerContext.Clients.TryGetValue(recipients[i].RemoteEndPoint, out var client))
+                {
+                    client.LastSendTime = nowMs;
+                    client.BytesSent += byteCount;
+                }
+            }
+
+            return recipients.Count;
         }
 
         public static void FlushSendQueue()

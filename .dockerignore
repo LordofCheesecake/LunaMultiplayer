@@ -1,25 +1,60 @@
+# Exclude everything that is not strictly needed to restore + publish the server
+# and master-server projects. Keeping the build context small speeds up
+# `docker build` (less data streamed to the daemon) and makes BuildKit cache
+# invalidation far more predictable.
+
+# Editor / tool artefacts
 *.swp
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+.cursor/
+.DS_Store
+
+# Build output
 **/bin/
 **/obj/
+**/Publish/
+**/TestResults/
+
+# VCS / CI / docs (not needed inside the image)
 .git/
+.gitattributes
+.gitignore
 .github/
-.idea/
 Documentation/
+*.md
+LICENSE
+
+# Client-only projects and their deps. The server/masterserver images never
+# build these, but leaving them in the context makes restores slower and
+# leaks game DLLs into the Docker build.
+#
+# NOTE: External/Dependencies/ IS needed: LmpUpdater.csproj copies
+# System.Runtime.Serialization.dll from there at build time. Only the large
+# client-only subdirectories are excluded.
+LmpClient/
 External/DebugLMP/
 External/Dependencies_OLD/
 External/KSPLibraries/
+External/Logos/
 External/Nuget/
 
-*.md
-*.txt
+# Test projects are not built inside the image
+LmpCommonTest/
+LmpMasterServerTest/
+ServerTest/
+
+# Local tooling artefacts
 appveyor_discord.ps1
 appveyor.yml
 azure-pipelines.yml
-.gitattributes
-.gitignore
-LICENSE
 .vsconfig
-
+Scripts/
+docker-compose*.yml
 Dockerfile*
 .dockerignore
-docker-compose.yml
+Postman_Release.txt
+NetRuntime.png

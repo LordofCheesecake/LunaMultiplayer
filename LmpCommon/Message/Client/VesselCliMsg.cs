@@ -37,7 +37,21 @@ namespace LmpCommon.Message.Client
         };
 
         public override ClientMessageType MessageType => ClientMessageType.Vessel;
-        protected override int DefaultChannel => IsUnreliableMessage() ? 0 : 8;
+
+        /// <summary>
+        /// Match the channel assignment on <see cref="Server.VesselSrvMsg"/>: Proto gets its own reliable channel
+        /// to avoid head-of-line blocking small reliable messages (ActionGroup, PartSync, Couple, etc.).
+        /// </summary>
+        protected override int DefaultChannel
+        {
+            get
+            {
+                if (IsUnreliableMessage()) return 0;
+                if (Data.SubType == (ushort)VesselMessageType.Proto) return 9;
+                return 8;
+            }
+        }
+
         public override NetDeliveryMethod NetDeliveryMethod => IsUnreliableMessage() ?
             NetDeliveryMethod.UnreliableSequenced : NetDeliveryMethod.ReliableOrdered;
 

@@ -1,5 +1,6 @@
 ﻿using LunaConfigNode;
 using Server.Context;
+using Server.System.Vessel;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -28,6 +29,11 @@ namespace Server.System
         public static void RemoveVessel(Guid vesselId)
         {
             CurrentVessels.TryRemove(vesselId, out _);
+
+            // Drop per-vessel bookkeeping (lock object + last-applied proto gameTime) so a later re-creation
+            // of a vessel with the same id is not blocked by a stale timestamp, and so these dictionaries
+            // do not grow unbounded over long server uptimes.
+            VesselDataUpdater.ForgetVessel(vesselId);
 
             _ = Task.Run(() =>
             {
@@ -86,7 +92,12 @@ namespace Server.System
         }
 
         /// <summary>
-        /// Actually performs the backup of the vessels to file
+        /// Actually performs the backup of the vessels to file.
+        /// Each vessel is serialized while holding its per-vessel lock (shared with <see cref="VesselDataUpdater"/>)
+        /// so a concurrent partial-update <see cref="Task"/> cannot mutate the same ConfigNode tree mid-walk,
+        /// which would otherwise produce a subtly inconsistent <c>.txt</c> on disk and cause vessels to
+        /// "revert" after a server restart. The disk write itself happens outside the per-vessel lock but
+        /// still inside <see cref="BackupLock"/> to keep file I/O serialized.
         /// </summary>
         public static void BackupVessels()
         {
@@ -95,21 +106,33 @@ namespace Server.System
                 var vesselsInCfgNode = CurrentVessels.ToArray();
                 foreach (var vessel in vesselsInCfgNode)
                 {
-                    FileHandler.WriteToFile(Path.Combine(VesselsPath, $"{vessel.Key}{VesselFileFormat}"), vessel.Value.ToString());
+                    string serialized;
+                    lock (VesselDataUpdater.GetVesselLock(vessel.Key))
+                    {
+                        serialized = vessel.Value.ToString();
+                    }
+                    FileHandler.WriteToFile(Path.Combine(VesselsPath, $"{vessel.Key}{VesselFileFormat}"), serialized);
                 }
             }
         }
 
         /// <summary>
         /// Writes one vessel to disk so live patches (orbit, IDENT, position fields) are reflected in the Vessels folder without waiting for <see cref="BackupVessels"/>.
+        /// Serializes under the per-vessel lock for the same reason as <see cref="BackupVessels"/>.
         /// </summary>
         public static void PersistVesselToFile(Guid vesselId)
         {
             if (!CurrentVessels.TryGetValue(vesselId, out var vessel)) return;
 
+            string serialized;
+            lock (VesselDataUpdater.GetVesselLock(vesselId))
+            {
+                serialized = vessel.ToString();
+            }
+
             lock (BackupLock)
             {
-                FileHandler.WriteToFile(Path.Combine(VesselsPath, $"{vesselId}{VesselFileFormat}"), vessel.ToString());
+                FileHandler.WriteToFile(Path.Combine(VesselsPath, $"{vesselId}{VesselFileFormat}"), serialized);
             }
         }
     }

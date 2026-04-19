@@ -8,6 +8,12 @@ namespace LmpCommon
         protected virtual LogLevels LogLevel => LogLevels.Debug;
         protected virtual bool UseUtcTime => false;
 
+        /// <summary>
+        /// True when the given level would be emitted. Call this from hot paths to short-circuit expensive
+        /// string building (interpolation / concatenation / ToString()) when the level is disabled.
+        /// </summary>
+        public bool IsEnabled(LogLevels level) => level <= LogLevel;
+
         protected virtual void AfterPrint(string line)
         {
             //Implement your own after logging code
@@ -25,6 +31,18 @@ namespace LmpCommon
             }
         }
 
+        /// <summary>
+        /// Lazy variant: <paramref name="messageFactory"/> is only invoked if the level is enabled. Use this
+        /// from hot paths to avoid paying the string-build cost when logs are disabled.
+        /// </summary>
+        private void WriteLogLazy(LogLevels level, string type, Func<string> messageFactory)
+        {
+            if (level <= LogLevel && messageFactory != null)
+            {
+                WriteLog(level, type, messageFactory());
+            }
+        }
+
         #endregion
 
         #region Public methods
@@ -37,6 +55,13 @@ namespace LmpCommon
             Console.ResetColor();
         }
 
+        /// <summary>Lazy overload: message is only built if the level is enabled.</summary>
+        public void NetworkVerboseDebug(Func<string> messageFactory)
+        {
+            if (!IsEnabled(LogLevels.VerboseNetworkDebug)) return;
+            NetworkVerboseDebug(messageFactory?.Invoke() ?? string.Empty);
+        }
+
         public void NetworkDebug(string message)
         {
             Console.BackgroundColor = ConsoleColor.DarkBlue;
@@ -45,11 +70,23 @@ namespace LmpCommon
             Console.ResetColor();
         }
 
+        public void NetworkDebug(Func<string> messageFactory)
+        {
+            if (!IsEnabled(LogLevels.NetworkDebug)) return;
+            NetworkDebug(messageFactory?.Invoke() ?? string.Empty);
+        }
+
         public void Debug(string message)
         {
             Console.ForegroundColor = ConsoleColor.Green;
             WriteLog(LogLevels.Debug, "Debug", message);
             Console.ResetColor();
+        }
+
+        public void Debug(Func<string> messageFactory)
+        {
+            if (!IsEnabled(LogLevels.Debug)) return;
+            Debug(messageFactory?.Invoke() ?? string.Empty);
         }
 
         public void Warning(string message)

@@ -1,6 +1,7 @@
 ﻿using Lidgren.Network;
 using LmpCommon.Message.Interface;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -12,15 +13,30 @@ namespace LmpCommon.Message.Base
         /// <summary>
         /// This dictionary contain all the messages that this factory handle
         /// </summary>
-        private readonly Dictionary<uint, Type> _messageDictionary = new Dictionary<uint, Type>();
+        private readonly Dictionary<uint, Type> _messageDictionary;
 
         /// <summary>
-        /// In the constructor we run through this instance and get all the message that inherit BaseMsgType and add them to the dictionary
+        /// Global cache of the (MessageType -> ClrType) dictionaries keyed by the factory's <see cref="BaseMsgType"/>.
+        /// The assembly scan + reflection pass is expensive and identical for every instance of a given factory
+        /// type, so we do it at most once per base type across the process lifetime.
+        /// </summary>
+        private static readonly ConcurrentDictionary<Type, Dictionary<uint, Type>> CachedDictionariesByBaseType =
+            new ConcurrentDictionary<Type, Dictionary<uint, Type>>();
+
+        /// <summary>
+        /// In the constructor we run through this instance and get all the message that inherit BaseMsgType and add them to the dictionary.
+        /// Uses a per-process cache keyed on <see cref="BaseMsgType"/> so the reflection pass is amortised.
         /// </summary>
         protected FactoryBase()
         {
+            _messageDictionary = CachedDictionariesByBaseType.GetOrAdd(BaseMsgType, BuildMessageDictionary);
+        }
+
+        private Dictionary<uint, Type> BuildMessageDictionary(Type baseMsgType)
+        {
+            var result = new Dictionary<uint, Type>();
             var msgTypes = Assembly.GetExecutingAssembly().GetTypes()
-                .Where(t => t.IsClass && t.BaseType != null && t.BaseType.IsGenericType && t.BaseType.GetGenericTypeDefinition() == BaseMsgType).ToArray();
+                .Where(t => t.IsClass && t.BaseType != null && t.BaseType.IsGenericType && t.BaseType.GetGenericTypeDefinition() == baseMsgType).ToArray();
 
             foreach (var msgType in msgTypes)
             {
@@ -38,8 +54,10 @@ namespace LmpCommon.Message.Base
                 }
 
                 var typeVal = typeProp.GetValue(instance, null);
-                _messageDictionary.Add((uint)(int)typeVal, msgType);
+                result.Add((uint)(int)typeVal, msgType);
             }
+
+            return result;
         }
 
         /// <summary>
@@ -53,26 +71,34 @@ namespace LmpCommon.Message.Base
         /// <param name="lidgrenMsg">Lidgren message</param>
         /// <param name="receiveTime">Lidgren msg receive time property or LunaTime.Now</param>
         /// <returns>Full message with it's data filled</returns>
+        /// <summary>
+        /// Minimum payload size for a valid message: two <see cref="ushort"/> (type, subtype) + pad bits.
+        /// Previously the length guard was <c>LengthBytes &gt;= 0</c> which is always true and never triggered;
+        /// now we require at least enough bytes to read the header. Smaller packets are rejected.
+        /// </summary>
+        private const int MinMessageBytes = sizeof(ushort) + sizeof(ushort);
+
         public IMessageBase Deserialize(NetIncomingMessage lidgrenMsg, long receiveTime)
         {
-            if (lidgrenMsg.LengthBytes >= 0)
+            if (lidgrenMsg.LengthBytes < MinMessageBytes)
             {
-                var messageType = lidgrenMsg.ReadUInt16();
-                var subtype = lidgrenMsg.ReadUInt16();
-                lidgrenMsg.SkipPadBits();
-
-                var msg = GetMessageByType(messageType);
-                var data = msg.GetMessageData(subtype);
-
-                data.Deserialize(lidgrenMsg);
-
-                msg.SetData(data);
-                msg.Data.ReceiveTime = receiveTime;
-                msg.VersionMismatch = !LmpVersioning.IsCompatible(msg.Data.MajorVersion, msg.Data.MinorVersion, msg.Data.BuildVersion);
-
-                return msg;
+                throw new Exception($"Incorrect message length: {lidgrenMsg.LengthBytes} bytes (minimum {MinMessageBytes})");
             }
-            throw new Exception("Incorrect message length");
+
+            var messageType = lidgrenMsg.ReadUInt16();
+            var subtype = lidgrenMsg.ReadUInt16();
+            lidgrenMsg.SkipPadBits();
+
+            var msg = GetMessageByType(messageType);
+            var data = msg.GetMessageData(subtype);
+
+            data.Deserialize(lidgrenMsg);
+
+            msg.SetData(data);
+            msg.Data.ReceiveTime = receiveTime;
+            msg.VersionMismatch = !LmpVersioning.IsCompatible(msg.Data.MajorVersion, msg.Data.MinorVersion, msg.Data.BuildVersion);
+
+            return msg;
         }
 
         /// <summary>

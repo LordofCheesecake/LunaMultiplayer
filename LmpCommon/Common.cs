@@ -10,12 +10,24 @@ namespace LmpCommon
 {
     public class Common
     {
+        /// <summary>
+        /// Payloads smaller than this are not worth compressing - the QLZ header and the CPU cost of the
+        /// compression pass exceed any byte savings. Adjust with measurement if different payload mixes change.
+        /// </summary>
+        private const int MinCompressionBytes = 256;
+
         public static void ThreadSafeCompress(object lockObj, ref byte[] data, ref int numBytes)
         {
+            // Skip compression for tiny payloads: the header + CPU cost typically outweighs the savings, and
+            // many small payloads actually grow after compression (see QLZ framing overhead).
+            if (numBytes < MinCompressionBytes) return;
+
             lock (lockObj)
             {
                 if (!CachedQlz.IsCompressed(data, numBytes))
                 {
+                    // Guard against concurrent-re-check: another broadcast thread may have compressed while we
+                    // were waiting for the lock; IsCompressed above would then be true and we'd skip the re-compress.
                     CachedQlz.Compress(ref data, ref numBytes);
                 }
             }

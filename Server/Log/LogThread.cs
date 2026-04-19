@@ -1,28 +1,33 @@
 ﻿using LmpCommon.Time;
 using Server.Context;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Server.Log
 {
     public class LogThread
     {
+        private const int PollIntervalMs = 250;
+        private const long LogExpireCheckIntervalMs = 600_000;
+        private const long DayCheckIntervalMs = 60_000;
+
         private static long _lastLogExpiredCheck;
         private static long _lastDayCheck;
 
-        public static async Task RunLogThreadAsync()
+        public static async Task RunLogThreadAsync(CancellationToken token)
         {
-            while (ServerContext.ServerRunning)
+            while (ServerContext.ServerRunning && !token.IsCancellationRequested)
             {
                 //Run the log expire function every 10 minutes
-                if (ServerContext.ServerClock.ElapsedMilliseconds - _lastLogExpiredCheck > 600000)
+                if (ServerContext.ServerClock.ElapsedMilliseconds - _lastLogExpiredCheck > LogExpireCheckIntervalMs)
                 {
                     _lastLogExpiredCheck = ServerContext.ServerClock.ElapsedMilliseconds;
                     LogExpire.ExpireLogs();
                 }
 
                 // Check if the day has changed, every minute
-                if (ServerContext.ServerClock.ElapsedMilliseconds - _lastDayCheck > 60000)
+                if (ServerContext.ServerClock.ElapsedMilliseconds - _lastDayCheck > DayCheckIntervalMs)
                 {
                     _lastDayCheck = ServerContext.ServerClock.ElapsedMilliseconds;
                     if (ServerContext.Day != LunaNetworkTime.Now.Day)
@@ -33,7 +38,14 @@ namespace Server.Log
                     }
                 }
 
-                await Task.Delay(250);
+                try
+                {
+                    await Task.Delay(PollIntervalMs, token);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
             }
         }
     }

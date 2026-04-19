@@ -1,6 +1,6 @@
 ﻿using LmpCommon.Message.Data.Vessel;
+using Server.Utilities;
 using System.Globalization;
-using System.Threading.Tasks;
 
 namespace Server.System.Vessel
 {
@@ -21,7 +21,7 @@ namespace Server.System.Vessel
             if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
             //Sync part changes ALWAYS and ignore the rate they arrive
-            _ = Task.Run(() =>
+            BackgroundWork.Fire(() =>
             {
                 lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                 {

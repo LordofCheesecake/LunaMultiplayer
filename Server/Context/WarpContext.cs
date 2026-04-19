@@ -33,6 +33,10 @@ namespace Server.Context
 
         public static readonly ConcurrentDictionary<int, Subspace> Subspaces = new ConcurrentDictionary<int, Subspace>();
 
-        public static Subspace LatestSubspace => Subspaces.OrderByDescending(s => s.Value.Time).Select(s => s.Value).First();
+        /// <summary>
+        /// Highest <c>Time</c> subspace currently known. Returns <c>null</c> when no subspaces exist (e.g. during
+        /// shutdown / reset races) instead of throwing <see cref="System.InvalidOperationException"/>.
+        /// </summary>
+        public static Subspace LatestSubspace => Subspaces.OrderByDescending(s => s.Value.Time).Select(s => s.Value).FirstOrDefault();
     }
 }

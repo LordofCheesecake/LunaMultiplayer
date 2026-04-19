@@ -18,6 +18,20 @@ namespace Server.Message
 {
     public class VesselMsgReader : ReaderBase
     {
+        /// <summary>
+        /// Returns true if the sender is allowed to mutate the given vessel's Update-lock-scoped state.
+        /// If no Update lock has been acquired for the vessel yet (e.g. initial proto, or nobody currently
+        /// owns the vessel), we permit the message - otherwise the sender must own the Update lock.
+        /// Same gating applies to position/update/resource/part-sync/actiongroup/fairing messages which are
+        /// all semantically "the Update-lock owner is driving this vessel".
+        /// </summary>
+        private static bool SenderMayMutateVessel(ClientStructure client, Guid vesselId)
+        {
+            if (!LockSystem.LockQuery.UpdateLockExists(vesselId))
+                return true;
+            return LockSystem.LockQuery.UpdateLockBelongsToPlayer(vesselId, client.PlayerName);
+        }
+
         public override void HandleMessage(ClientStructure client, IClientMessageBase message)
         {
             var messageData = message.Data as VesselBaseMsgData;
@@ -34,48 +48,64 @@ namespace Server.Message
                     HandleVesselRemove(client, messageData);
                     break;
                 case VesselMessageType.Position:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
-                    if (client.Subspace == WarpContext.LatestSubspace.Id)
+                    // LatestSubspace can be null during shutdown/reset; only persist when on the authoritative subspace.
+                    var latestSubspaceForPos = WarpContext.LatestSubspace;
+                    if (latestSubspaceForPos != null && client.Subspace == latestSubspaceForPos.Id)
                         VesselDataUpdater.WritePositionDataToFile(messageData);
                     break;
                 case VesselMessageType.Flightstate:
+                    // Flight state is the Control-lock owner's per-frame ctrl input; gate on Control lock.
+                    if (LockSystem.LockQuery.ControlLockExists(messageData.VesselId) &&
+                        !LockSystem.LockQuery.ControlLockBelongsToPlayer(messageData.VesselId, client.PlayerName))
+                        return;
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     VesselDataUpdater.WriteFlightstateDataToFile(messageData);
                     break;
                 case VesselMessageType.Update:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     VesselDataUpdater.WriteUpdateDataToFile(messageData);
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.Resource:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     VesselDataUpdater.WriteResourceDataToFile(messageData);
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.PartSyncField:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     VesselDataUpdater.WritePartSyncFieldDataToFile(messageData);
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.PartSyncUiField:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     VesselDataUpdater.WritePartSyncUiFieldDataToFile(messageData);
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.PartSyncCall:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.ActionGroup:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     VesselDataUpdater.WriteActionGroupDataToFile(messageData);
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.Fairing:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     VesselDataUpdater.WriteFairingDataToFile(messageData);
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.Decouple:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 case VesselMessageType.Couple:
                     HandleVesselCouple(client, messageData);
                     break;
                 case VesselMessageType.Undock:
+                    if (!SenderMayMutateVessel(client, messageData.VesselId)) return;
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 default:
@@ -97,7 +127,7 @@ namespace Server.Message
             }
 
             if (data.AddToKillList)
-                VesselContext.RemovedVessels.TryAdd(data.VesselId, 0);
+                VesselContext.AddRemovedVessel(data.VesselId);
 
             //Relay the message.
             MessageQueuer.RelayMessage<VesselSrvMsg>(client, data);
@@ -120,7 +150,13 @@ namespace Server.Message
                 LunaLog.Debug($"Saving vessel {msgData.VesselId} ({ByteSize.FromBytes(msgData.NumBytes).KiloBytes} KB) from {client.PlayerName}.");
             }
 
-            VesselDataUpdater.RawConfigNodeInsertOrUpdate(msgData.VesselId, Encoding.UTF8.GetString(msgData.Data, 0, msgData.NumBytes));
+            var accepted = VesselDataUpdater.RawConfigNodeInsertOrUpdate(msgData.VesselId, msgData.GameTime, Encoding.UTF8.GetString(msgData.Data, 0, msgData.NumBytes));
+            if (!accepted)
+            {
+                // Drop relay too: forwarding a strictly-older snapshot would force other clients into the same revert.
+                return;
+            }
+
             MessageQueuer.RelayMessage<VesselSrvMsg>(client, msgData);
         }
 
@@ -138,7 +174,8 @@ namespace Server.Message
             foreach (var vesselId in vesselsToSend)
             {
                 var vesselData = VesselStoreSystem.GetVesselInConfigNodeFormat(vesselId);
-                if (vesselData.Length > 0)
+                // Vessel may have been concurrently removed between Keys snapshot and serialization - skip those.
+                if (!string.IsNullOrEmpty(vesselData))
                 {
                     var protoMsg = ServerContext.ServerMessageFactory.CreateNewMessageData<VesselProtoMsgData>();
                     protoMsg.Data = Encoding.UTF8.GetBytes(vesselData);

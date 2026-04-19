@@ -9,9 +9,11 @@ namespace LmpClient.Base
     public abstract class SystemBase
     {
         /// <summary>
-        /// Use this property to generate messages
+        /// Use this property to generate messages. Delegates to <see cref="LmpClient.Network.NetworkMain.CliMsgFactory"/>
+        /// so the assembly-scan in <see cref="ClientMessageFactory"/>'s constructor runs only once per process
+        /// instead of twice (previously this field and NetworkMain each constructed their own factory).
         /// </summary>
-        public static ClientMessageFactory MessageFactory { get; } = new ClientMessageFactory();
+        public static ClientMessageFactory MessageFactory => LmpClient.Network.NetworkMain.CliMsgFactory;
 
         /// <summary>
         /// Main task factory, use it to instance new small tasks

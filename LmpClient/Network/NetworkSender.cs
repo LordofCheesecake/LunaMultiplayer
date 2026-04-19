@@ -18,6 +18,19 @@ namespace LmpClient.Network
         private const int MaxMessagesPerBatch = 128;
 
         /// <summary>
+        /// Cap on the outgoing queue size. If the send thread falls behind (CPU pressure, network hiccup),
+        /// we drop the oldest messages rather than let the queue grow without bound. At 60 messages/sec
+        /// this is ~1 minute of buffered traffic - generous for legitimate lag, but catches pathological growth.
+        /// </summary>
+        private const int MaxOutgoingQueueSize = 4096;
+
+        /// <summary>
+        /// Diagnostic counter: how many messages we've dropped because the queue exceeded its cap. Exposed for
+        /// statistics/debug windows; not an authoritative metric but useful in incident investigation.
+        /// </summary>
+        public static long DroppedOverflowMessages;
+
+        /// <summary>
         /// Main sending thread
         /// </summary>
         public static void SendMain()
@@ -54,11 +67,21 @@ namespace LmpClient.Network
         }
 
         /// <summary>
-        /// Adds a new message to the queue
+        /// Adds a new message to the queue. If the queue is over capacity, drop the oldest entry (FIFO) and
+        /// increment <see cref="DroppedOverflowMessages"/>. Dropping oldest (not newest) preserves freshness
+        /// of gameplay-relevant state while still keeping the queue bounded.
         /// </summary>
         public static void QueueOutgoingMessage(IMessageBase message)
         {
+            if (message == null) return;
+
             OutgoingMessages.Enqueue(message);
+
+            while (OutgoingMessages.Count > MaxOutgoingQueueSize && OutgoingMessages.TryDequeue(out var dropped))
+            {
+                Interlocked.Increment(ref DroppedOverflowMessages);
+                dropped?.Recycle();
+            }
         }
 
         /// <summary>

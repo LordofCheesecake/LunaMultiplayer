@@ -57,9 +57,17 @@ namespace LmpCommon.Message.Interface
         void Serialize(NetOutgoingMessage lidgrenMsg);
 
         /// <summary>
-        /// Call this method to send the message back to the pool
+        /// Call this method to send the message back to the pool (both the wrapper and the attached Data).
+        /// Safe to call multiple times (idempotent after the first call).
         /// </summary>
         void Recycle();
+
+        /// <summary>
+        /// Recycle only the wrapper, leaving <see cref="Data"/> alone so that other wrappers still referencing
+        /// the same shared <see cref="IMessageData"/> (e.g. after a broadcast relay) can continue to serialize it
+        /// without use-after-free. Use this from the central receive-finally path when you do not own the Data.
+        /// </summary>
+        void RecycleWrapperOnly();
 
         /// <summary>
         /// Gets the message size in bytes

@@ -124,6 +124,12 @@ namespace LmpCommon.Message.Base
         }
 
         /// <inheritdoc />
+        public void RecycleWrapperOnly()
+        {
+            MessageStore.RecycleWrapper(this);
+        }
+
+        /// <inheritdoc />
         public int GetMessageSize()
         {
             return sizeof(ushort) + sizeof(ushort) + Data.GetMessageSize();

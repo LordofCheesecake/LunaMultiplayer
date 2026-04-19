@@ -1,25 +1,96 @@
-# You also need the Dockerfile_Server file, put it in the same directory as this file.
-# Build and create a container with: docker-compose up -d --build
-# You may set the version of the server when an update is released, see "args"
+# docker-compose.yml - Compose v2 (no top-level `version:` key; that field is
+# deprecated in the current Compose spec).
 #
-# Attach to the container with: docker-compose exec lunamultiplayer /bin/ash
-version: '3.3'
+#   docker compose up -d --build                 # server only (default)
+#   docker compose --profile master up -d --build  # server + master server
+#   docker compose logs -f lunamultiplayer
+#   docker compose exec lunamultiplayer /bin/ash
+#
+# Persistent state defaults to the bind mounts below. Override the host paths
+# by setting LMP_DATA_DIR in your environment or a `.env` file.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    # Cap log growth so a long-running server does not fill the host disk.
+    max-size: "10m"
+    max-file: "5"
+
 services:
-    lunamultiplayer:
-        image: lunamultiplayer:local
-        build:
-          context: ./
-          dockerfile: Dockerfile_Server
-        container_name: lunamultiplayer
-        environment:
-            - TZ=CET
-        ports:
-            - '8800:8800/udp'
-            # uncomment to enable website
-            # - '8900:8900'
-        volumes:
-            - '/opt/LMPServer/Config:/LMPServer/Config'
-            - '/opt/LMPServer/Universe:/LMPServer/Universe'
-            - '/opt/LMPServer/Plugins:/LMPServer/Plugins'
-            - '/opt/LMPServer/logs:/LMPServer/logs'
-        restart: unless-stopped
+  lunamultiplayer:
+    image: lunamultiplayer:local
+    container_name: lunamultiplayer
+    build:
+      context: .
+      dockerfile: Dockerfile_Server
+      # Uncomment to cross-build for another arch on CI / Apple Silicon.
+      # platforms: ["linux/amd64"]
+    # Align the in-container user with the bind-mount owner on the host.
+    # Defaults match the Dockerfile's LMP_UID/LMP_GID.
+    user: "${LMP_UID:-1000}:${LMP_GID:-1000}"
+    environment:
+      TZ: "${TZ:-UTC}"
+    ports:
+      - "8800:8800/udp"
+      # Enable the built-in HTTP admin / server-list endpoint:
+      # - "8900:8900/tcp"
+    volumes:
+      - "${LMP_DATA_DIR:-./.lmp-data}/Config:/LMPServer/Config"
+      - "${LMP_DATA_DIR:-./.lmp-data}/Universe:/LMPServer/Universe"
+      - "${LMP_DATA_DIR:-./.lmp-data}/Plugins:/LMPServer/Plugins"
+      - "${LMP_DATA_DIR:-./.lmp-data}/logs:/LMPServer/logs"
+    restart: unless-stopped
+    # SIGINT is the shutdown signal used by the server (flushes backup on exit).
+    # Give it time to finish the backup before docker escalates to SIGKILL.
+    stop_grace_period: 30s
+    stop_signal: SIGINT
+    # Reap zombies and forward signals cleanly for the single-process payload.
+    init: true
+    # Lock down the container filesystem. Writable paths come from the volumes
+    # above; a small tmpfs covers /tmp for anything that needs a scratch dir.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          # Sensible ceiling for small-to-medium servers; raise if your save
+          # grows large. Remove the block entirely to opt out.
+          memory: 2g
+    logging: *default-logging
+
+  # Optional master-server. Start it with:
+  #   docker compose --profile master up -d
+  masterserver:
+    image: lmpms:local
+    container_name: lmpms
+    profiles: ["master"]
+    build:
+      context: .
+      dockerfile: Dockerfile_MasterServer
+    user: "${LMP_UID:-1000}:${LMP_GID:-1000}"
+    environment:
+      TZ: "${TZ:-UTC}"
+    ports:
+      - "8700:8700/udp"
+      - "8701:8701/tcp"
+    restart: unless-stopped
+    stop_grace_period: 15s
+    stop_signal: SIGINT
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging: *default-logging

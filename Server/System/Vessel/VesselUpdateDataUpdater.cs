@@ -1,8 +1,8 @@
 ﻿using LmpCommon.Message.Data.Vessel;
+using Server.Utilities;
 using System;
 using System.Collections.Concurrent;
 using System.Globalization;
-using System.Threading.Tasks;
 
 namespace Server.System.Vessel
 {
@@ -36,7 +36,7 @@ namespace Server.System.Vessel
             {
                 LastUpdateDictionary.AddOrUpdate(msgData.VesselId, DateTime.Now, (key, existingVal) => DateTime.Now);
 
-                _ = Task.Run(() =>
+                BackgroundWork.Fire(() =>
                 {
                     lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {

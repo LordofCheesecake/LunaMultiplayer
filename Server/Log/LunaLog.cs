@@ -36,9 +36,18 @@ namespace Server.Log
 
         #region Public methods
 
+        /// <summary>True if the given level is currently enabled; use to gate hot-path string building.</summary>
+        public static bool IsLevelEnabled(LogLevels level) => Singleton.IsEnabled(level);
+
         public new static void NetworkVerboseDebug(string message)
         {
             Singleton.NetworkVerboseDebug(message);
+        }
+
+        /// <summary>Lazy overload: the factory is only invoked if the level is enabled.</summary>
+        public new static void NetworkVerboseDebug(Func<string> messageFactory)
+        {
+            Singleton.NetworkVerboseDebug(messageFactory);
         }
 
         public new static void NetworkDebug(string message)
@@ -46,9 +55,19 @@ namespace Server.Log
             Singleton.NetworkDebug(message);
         }
 
+        public new static void NetworkDebug(Func<string> messageFactory)
+        {
+            Singleton.NetworkDebug(messageFactory);
+        }
+
         public new static void Debug(string message)
         {
             Singleton.Debug(message);
+        }
+
+        public new static void Debug(Func<string> messageFactory)
+        {
+            Singleton.Debug(messageFactory);
         }
 
         public new static void Warning(string message)

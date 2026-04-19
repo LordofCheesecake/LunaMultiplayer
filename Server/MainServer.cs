@@ -107,7 +107,7 @@ namespace Server
                 TaskContainer.Add(LongRunTaskFactory.StartNew(WebServer.RefreshWebServerInformationAsync, CancellationTokenSrc.Token));
 
                 TaskContainer.Add(LongRunTaskFactory.StartNew(LmpPortMapper.RefreshUpnpPortAsync, CancellationTokenSrc.Token));
-                TaskContainer.Add(LongRunTaskFactory.StartNew(LogThread.RunLogThreadAsync, CancellationTokenSrc.Token));
+                TaskContainer.Add(LongRunTaskFactory.StartNew(() => LogThread.RunLogThreadAsync(CancellationTokenSrc.Token), CancellationTokenSrc.Token));
                 TaskContainer.Add(LongRunTaskFactory.StartNew(ClientMainThread.ThreadMainAsync, CancellationTokenSrc.Token));
 
                 TaskContainer.Add(LongRunTaskFactory.StartNew(() => BackupSystem.PerformBackupsAsync(CancellationTokenSrc.Token), CancellationTokenSrc.Token));
@@ -176,33 +176,48 @@ namespace Server
         private static int GetRunningInstances() => Process.GetProcessesByName("LunaServer.exe").Length;
 
         /// <summary>
-        /// Runs the exit logic
+        /// Runs the exit logic.
+        /// Order matters: the server-running flag and cancellation token must be flipped BEFORE waiting on
+        /// background tasks, because several of them loop on <see cref="ServerContext.ServerRunning"/> and would
+        /// otherwise pin the join forever.
         /// </summary>
         private static async Task ExitAsync()
         {
             LunaLog.Normal("Exiting... Please wait until all threads are finished");
             ExitEvent.Exit();
 
+            // Signal shutdown first so any `while (ServerRunning)` loops can exit promptly.
+            ServerContext.ServerRunning = false;
+            ServerContext.ServerStarting = false;
             await CancellationTokenSrc.CancelAsync();
+
             await Task.WhenAll(TaskContainer);
 
+            // Now run the shutdown I/O (send disconnect to all, flush, etc.) once background tasks have drained.
             ServerContext.Shutdown("Server is shutting down");
 
             QuitEvent.Set();
         }
 
         /// <summary>
-        /// Runs the restart logic
+        /// Runs the restart logic. Same ordering rules as <see cref="ExitAsync"/>.
+        /// Previous implementation awaited the never-returning <see cref="BackupSystem.PerformBackupsAsync"/> loop
+        /// which deadlocked the restart path; now runs a single synchronous backup instead.
         /// </summary>
         public static async Task RestartAsync()
         {
-            //Perform Backups
-            await BackupSystem.PerformBackupsAsync(CancellationTokenSrc.Token);
             LunaLog.Normal("Restarting...  Please wait until all threads are finished");
 
-            ServerContext.Shutdown("Server is restarting");
+            // Single-shot backup: previous code awaited the backup *loop* which never completes.
+            BackupSystem.RunBackup();
+
+            ServerContext.ServerRunning = false;
+            ServerContext.ServerStarting = false;
             await CancellationTokenSrc.CancelAsync();
+
             await Task.WhenAll(TaskContainer);
+
+            ServerContext.Shutdown("Server is restarting");
 
             IsRestart = true;
 

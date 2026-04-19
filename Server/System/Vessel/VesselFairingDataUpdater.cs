@@ -1,5 +1,5 @@
 ﻿using LmpCommon.Message.Data.Vessel;
-using System.Threading.Tasks;
+using Server.Utilities;
 
 namespace Server.System.Vessel
 {
@@ -21,7 +21,7 @@ namespace Server.System.Vessel
             if (VesselContext.RemovedVessels.ContainsKey(msgData.VesselId)) return;
 
             //Sync fairings ALWAYS and ignore the rate they arrive
-            _ = Task.Run(() =>
+            BackgroundWork.Fire(() =>
             {
                 lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                 {

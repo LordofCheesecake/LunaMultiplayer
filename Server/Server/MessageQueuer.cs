@@ -1,7 +1,9 @@
-﻿using LmpCommon.Message.Interface;
+﻿using Lidgren.Network;
+using LmpCommon.Message.Interface;
 using Server.Client;
 using Server.Context;
-using System.Linq;
+using System;
+using System.Collections.Generic;
 
 namespace Server.Server
 {
@@ -24,8 +26,7 @@ namespace Server.Server
         {
             if (data == null) return;
 
-            foreach (var otherClient in ServerContext.Clients.Values.Where(c => c.Subspace == subspace))
-                SendToClient(otherClient, GenerateMessage<T>(data));
+            Broadcast<T>(data, client => client.Subspace == subspace);
         }
 
         /// <summary>
@@ -35,8 +36,7 @@ namespace Server.Server
         {
             if (data == null) return;
 
-            foreach (var otherClient in ServerContext.Clients.Values.Where(c => !Equals(c, exceptClient) && c.Subspace == subspace))
-                SendToClient(otherClient, GenerateMessage<T>(data));
+            Broadcast<T>(data, client => !Equals(client, exceptClient) && client.Subspace == subspace);
         }
 
         /// <summary>
@@ -46,8 +46,7 @@ namespace Server.Server
         {
             if (data == null) return;
 
-            foreach (var otherClient in ServerContext.Clients.Values.Where(c => !Equals(c, exceptClient)))
-                SendToClient(otherClient, GenerateMessage<T>(data));
+            Broadcast<T>(data, client => !Equals(client, exceptClient));
         }
 
         /// <summary>
@@ -57,8 +56,7 @@ namespace Server.Server
         {
             if (data == null) return;
 
-            foreach (var otherClient in ServerContext.Clients.Values)
-                SendToClient(otherClient, GenerateMessage<T>(data));
+            Broadcast<T>(data, _ => true);
         }
 
         /// <summary>
@@ -94,13 +92,54 @@ namespace Server.Server
         {
             if (msg?.Data == null) return;
 
-            client?.SendMessageQueue.Enqueue(msg);
+            // EnqueueMessage applies a bounded queue (drop-oldest on overflow) so a stuck client cannot cause
+            // per-client queue growth on the server.
+            client?.EnqueueMessage(msg);
         }
 
         private static T GenerateMessage<T>(IMessageData data) where T : class, IServerMessageBase
         {
             var newMessage = ServerContext.ServerMessageFactory.CreateNew<T>(data);
             return newMessage;
+        }
+
+        /// <summary>
+        /// Serialize once, Lidgren-broadcasts to all connections matching <paramref name="predicate"/>, and then
+        /// fully recycles the wrapper + shared <see cref="IMessageData"/>. This avoids the N-way concurrent
+        /// serialize / compress on a single shared Data instance that the old per-client-enqueue path caused.
+        /// </summary>
+        private static void Broadcast<T>(IMessageData data, Func<ClientStructure, bool> predicate) where T : class, IServerMessageBase
+        {
+            var recipients = new List<NetConnection>(ServerContext.Clients.Count);
+            foreach (var client in ServerContext.Clients.Values)
+            {
+                if (client?.Connection == null) continue;
+                if (predicate(client)) recipients.Add(client.Connection);
+            }
+
+            if (recipients.Count == 0)
+            {
+                // Nothing to send - but we still need to recycle the Data (otherwise pooled IMessageData leaks).
+                // Wrap and recycle through the normal path.
+                var empty = GenerateMessage<T>(data);
+                empty?.Recycle();
+                return;
+            }
+
+            var msg = GenerateMessage<T>(data);
+            try
+            {
+                LidgrenServer.BroadcastMessage(recipients, msg);
+                // AutoFlushSendQueue is disabled on the server config; broadcasts go direct, so flush here
+                // to prevent broadcasts from being stuck until the next per-client send-thread tick.
+                LidgrenServer.FlushSendQueue();
+            }
+            finally
+            {
+                // Safe: Lidgren has serialized into its own outgoing buffer already, so the shared Data
+                // is no longer needed by the send path.
+                msg.Recycle();
+            }
         }
 
         #endregion

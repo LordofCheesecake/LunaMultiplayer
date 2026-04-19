@@ -15,8 +15,6 @@ namespace LmpClient.Systems.Lock
     {
         public ConcurrentQueue<IServerMessageBase> IncomingMessages { get; set; } = new ConcurrentQueue<IServerMessageBase>();
 
-        private static readonly List<LockDefinition> LocksToRemove = new List<LockDefinition>();
-
         public void HandleMessage(IServerMessageBase msg)
         {
             if (!(msg.Data is LockBaseMsgData msgData)) return;
@@ -26,6 +24,11 @@ namespace LmpClient.Systems.Lock
                 case LockMessageType.ListReply:
                     {
                         var data = (LockListReplyMsgData)msgData;
+
+                        // ListReply is an authoritative snapshot. Clear the local store first so stale entries
+                        // from a previous session / reconnect can't survive the refresh.
+                        LockSystem.LockStore.ClearAllLocks();
+
                         for (var i = 0; i < data.LocksCount; i++)
                         {
                             LockSystem.LockStore.AddOrUpdateLock(data.Locks[i]);

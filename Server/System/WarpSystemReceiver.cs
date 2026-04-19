@@ -11,20 +11,45 @@ namespace Server.System
     {
         private static readonly object CreateSubspaceLock = new object();
 
+        // Sanity bounds for the client-supplied ServerTimeDifference (seconds). Subspaces represent an in-game universe
+        // time offset, so a few centuries in either direction is already well beyond any legitimate KSP save. We cap to
+        // prevent a buggy/malicious client from jumping everyone billions of years.
+        private const double MinServerTimeDifferenceSeconds = -1_000_000_000d; // ~-31 years
+        private const double MaxServerTimeDifferenceSeconds =  100_000_000_000d; // ~3170 years forward
+
         public void HandleNewSubspace(ClientStructure client, WarpNewSubspaceMsgData message)
         {
             lock (CreateSubspaceLock)
             {
                 if (message.PlayerCreator != client.PlayerName) return;
 
+                // Reject NaN/Infinity and values outside reasonable bounds.
+                var serverTimeDifference = message.ServerTimeDifference;
+                if (double.IsNaN(serverTimeDifference) || double.IsInfinity(serverTimeDifference) ||
+                    serverTimeDifference < MinServerTimeDifferenceSeconds ||
+                    serverTimeDifference > MaxServerTimeDifferenceSeconds)
+                {
+                    LunaLog.Warning($"Rejecting subspace from {client.PlayerName}: ServerTimeDifference {serverTimeDifference} out of range");
+                    return;
+                }
+
+                // Reject subspace that claims to be earlier than the current latest subspace; subspaces are meant to
+                // represent advancement in universe time, not jumps backward into "the shared past".
+                var latest = WarpContext.LatestSubspace;
+                if (latest != null && serverTimeDifference < latest.Time)
+                {
+                    LunaLog.Warning($"Rejecting subspace from {client.PlayerName}: offset {serverTimeDifference} earlier than current latest {latest.Time}");
+                    return;
+                }
+
                 LunaLog.Debug($"{client.PlayerName} created the new subspace '{WarpContext.NextSubspaceId}'");
 
                 //Create Subspace
-                WarpContext.Subspaces.TryAdd(WarpContext.NextSubspaceId, new Subspace(WarpContext.NextSubspaceId, message.ServerTimeDifference, client.PlayerName));
+                WarpContext.Subspaces.TryAdd(WarpContext.NextSubspaceId, new Subspace(WarpContext.NextSubspaceId, serverTimeDifference, client.PlayerName));
 
                 //Tell all Clients about the new Subspace
                 var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<WarpNewSubspaceMsgData>();
-                msgData.ServerTimeDifference = message.ServerTimeDifference;
+                msgData.ServerTimeDifference = serverTimeDifference;
                 msgData.PlayerCreator = message.PlayerCreator;
                 msgData.SubspaceKey = WarpContext.NextSubspaceId;
 
@@ -43,9 +68,19 @@ namespace Server.System
             if (oldSubspace != newSubspace)
             {
                 if (newSubspace < 0)
+                {
                     LunaLog.Debug($"{client.PlayerName} is warping");
-                else if (WarpContext.Subspaces[newSubspace].Creator != client.PlayerName)
-                    LunaLog.Debug($"{client.PlayerName} synced with subspace '{message.Subspace}' created by {WarpContext.Subspaces[newSubspace].Creator}");
+                }
+                else if (!WarpContext.Subspaces.TryGetValue(newSubspace, out var newSubspaceEntry))
+                {
+                    // Client referenced a subspace the server does not know about; reject rather than crash.
+                    LunaLog.Warning($"{client.PlayerName} requested unknown subspace '{newSubspace}' - ignoring");
+                    return;
+                }
+                else if (newSubspaceEntry.Creator != client.PlayerName)
+                {
+                    LunaLog.Debug($"{client.PlayerName} synced with subspace '{message.Subspace}' created by {newSubspaceEntry.Creator}");
+                }
 
                 var msgData = ServerContext.ServerMessageFactory.CreateNewMessageData<WarpChangeSubspaceMsgData>();
                 msgData.PlayerName = client.PlayerName;

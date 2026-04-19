@@ -210,15 +210,16 @@ namespace LmpClient.Systems.Warp
 
         public bool PlayerIsInPastSubspace(string player)
         {
-            if (ClientSubspaceList.ContainsKey(player) && CurrentSubspace >= 0)
-            {
-                var playerSubspace = ClientSubspaceList[player];
-                if (playerSubspace == -1)
-                    return false;
+            if (!ClientSubspaceList.TryGetValue(player, out var playerSubspace) || CurrentSubspace < 0)
+                return false;
 
-                return playerSubspace != CurrentSubspace && Subspaces[playerSubspace] < Subspaces[CurrentSubspace];
-            }
-            return false;
+            if (playerSubspace == -1 || playerSubspace == CurrentSubspace)
+                return false;
+
+            // Subspaces and ClientSubspaceList can diverge briefly during join/leave; guard both lookups.
+            return Subspaces.TryGetValue(playerSubspace, out var playerTime)
+                   && Subspaces.TryGetValue(CurrentSubspace, out var currentTime)
+                   && playerTime < currentTime;
         }
 
         /// <summary>
@@ -247,13 +248,13 @@ namespace LmpClient.Systems.Warp
         /// </summary>
         public double GetSubspaceTime(int subspace)
         {
-            if (!Subspaces.ContainsKey(subspace)) return 0d;
+            if (!Subspaces.TryGetValue(subspace, out var offset)) return 0d;
 
-            var result = TimeSyncSystem.ServerClockSec + Subspaces[subspace];
+            var result = TimeSyncSystem.ServerClockSec + offset;
             if (double.IsNaN(result) || double.IsInfinity(result) || result < 0)
             {
                 LunaLog.LogWarning($"[LMP]: GetSubspaceTime({subspace}) produced invalid result {result} " +
-                                   $"(ServerClockSec={TimeSyncSystem.ServerClockSec}, offset={Subspaces[subspace]}). Returning 0.");
+                                   $"(ServerClockSec={TimeSyncSystem.ServerClockSec}, offset={offset}). Returning 0.");
                 return 0d;
             }
 

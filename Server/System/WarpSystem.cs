@@ -26,7 +26,13 @@ namespace Server.System
             content += $"#It must always contain ONLY 1 subspace which will be the most advanced in the future{Environment.NewLine}";
             content += $"#The value is defined as: subspaceId:server_time_difference_in_seconds.{Environment.NewLine}";
 
-            content += $"{WarpContext.LatestSubspace}";
+            var latest = WarpContext.LatestSubspace;
+            if (latest == null)
+            {
+                LunaLog.Warning("Skipped subspace backup: no subspaces present");
+                return;
+            }
+            content += $"{latest}";
 
             FileHandler.WriteToFile(SubspaceFile, content);
         }
@@ -42,7 +48,8 @@ namespace Server.System
                 return false;
 
             //We are in the latest subspace and we NEVER remove it!
-            if (subspaceToRemove == WarpContext.LatestSubspace.Id)
+            var latest = WarpContext.LatestSubspace;
+            if (latest != null && subspaceToRemove == latest.Id)
                 return false;
 
             LunaLog.Debug($"Removing abandoned subspace '{subspaceToRemove}'");
@@ -111,10 +118,10 @@ namespace Server.System
         /// </summary>
         public static int[] GetPastSubspaces(int subspace)
         {
-            if (!WarpContext.Subspaces.ContainsKey(subspace))
+            if (!WarpContext.Subspaces.TryGetValue(subspace, out var reference))
                 return new int[0];
 
-            return WarpContext.Subspaces.Values.Where(s => s.Id != subspace && WarpContext.Subspaces.TryGetValue(subspace, out var anotherSubspace) && s.Time < anotherSubspace.Time)
+            return WarpContext.Subspaces.Values.Where(s => s.Id != subspace && s.Time < reference.Time)
                 .Select(s => s.Id).ToArray();
         }
 
@@ -123,16 +130,10 @@ namespace Server.System
         /// </summary>
         public static int[] GetFutureSubspaces(int subspace)
         {
-            return WarpContext.Subspaces.Values.Where(s => s.Id != subspace && WarpContext.Subspaces.TryGetValue(subspace, out var anotherSubspace) && s.Time > anotherSubspace.Time)
+            // Resolve the reference subspace's time once rather than doing a TryGetValue inside the per-element predicate.
+            if (!WarpContext.Subspaces.TryGetValue(subspace, out var reference)) return new int[0];
+            return WarpContext.Subspaces.Values.Where(s => s.Id != subspace && s.Time > reference.Time)
                 .Select(s => s.Id).ToArray();
-        }
-
-        /// <summary>
-        /// Returns the empty subspaces. Caution as here the latest subspace can be included!
-        /// </summary>
-        public static int[] GetEmptySubspaces()
-        {
-            return WarpContext.Subspaces.ToArray().Where(s => !ServerContext.Clients.Any(c => c.Value.Subspace == s.Key)).Select(s => s.Key).ToArray();
         }
 
         #endregion

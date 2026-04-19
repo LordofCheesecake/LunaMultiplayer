@@ -8,6 +8,15 @@ namespace Server.System.Vessel.Classes
 {
     public class Vessel
     {
+        /// <summary>
+        /// Per-thread StringBuilder reused across <see cref="ToString"/> calls on the vessel serialization path
+        /// (backup and single-vessel persist). Avoids allocating a fresh multi-KB <see cref="StringBuilder"/>
+        /// buffer for every vessel on every backup tick. The builder itself stays alive for the thread lifetime;
+        /// only the final <see cref="string"/> is fresh (unavoidable given downstream <c>FileHandler.WriteToFile(string)</c>).
+        /// </summary>
+        [ThreadStatic]
+        private static StringBuilder _serializationBuilder;
+
         public MixedCollection<string, string> Fields;
         public MixedCollection<uint, Part> Parts;
         public MixedCollection<string, string> Orbit;
@@ -60,7 +69,9 @@ namespace Server.System.Vessel.Classes
 
         public override string ToString()
         {
-            var builder = new StringBuilder();
+            // Reuse the per-thread builder so the underlying char[] is amortised across calls. Clear before use.
+            var builder = _serializationBuilder ??= new StringBuilder(capacity: 16 * 1024);
+            builder.Clear();
 
             CfgNodeWriter.WriteValues(Fields.GetAll(), 0, builder);
 

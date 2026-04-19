@@ -22,6 +22,13 @@ namespace LmpClient.Systems.VesselProtoSys
 
         public readonly HashSet<Guid> VesselsUnableToLoad = new HashSet<Guid>();
 
+        /// <summary>
+        /// Highest <c>GameTime</c> actually applied to the scene for a given vessel. Protos dequeued with a
+        /// strictly smaller <c>GameTime</c> are dropped to stop a late-arriving (or out-of-order) snapshot
+        /// from briefly reverting a remote vessel. Defence in depth for the server-side monotonic guard.
+        /// </summary>
+        private readonly ConcurrentDictionary<Guid, double> _lastAppliedProtoGameTime = new ConcurrentDictionary<Guid, double>();
+
         public ConcurrentDictionary<Guid, VesselProtoQueue> VesselProtos { get; } = new ConcurrentDictionary<Guid, VesselProtoQueue>();
 
         public bool ProtoSystemReady => Enabled && FlightGlobals.ready && HighLogic.LoadedScene == GameScenes.FLIGHT &&
@@ -81,6 +88,7 @@ namespace LmpClient.Systems.VesselProtoSys
             VesselProtos.Clear();
             VesselsUnableToLoad.Clear();
             QueuedVesselsToSend.Clear();
+            _lastAppliedProtoGameTime.Clear();
         }
 
         #endregion
@@ -131,25 +139,38 @@ namespace LmpClient.Systems.VesselProtoSys
                         if (VesselRemoveSystem.VesselWillBeKilled(vesselProto.VesselId))
                             continue;
 
+                        // Capture before Recycle so we can use these after the proto is returned to the pool.
+                        var vesselId = vesselProto.VesselId;
+                        var protoGameTime = vesselProto.GameTime;
+
+                        // Drop strictly-older protos for this vessel so a late/out-of-order snapshot
+                        // cannot momentarily revert the scene to an earlier state.
+                        if (_lastAppliedProtoGameTime.TryGetValue(vesselId, out var prevGameTime) && protoGameTime < prevGameTime)
+                        {
+                            keyVal.Value.Recycle(vesselProto);
+                            continue;
+                        }
+
                         var forceReload = vesselProto.ForceReload;
                         var protoVessel = vesselProto.CreateProtoVessel();
                         keyVal.Value.Recycle(vesselProto);
 
-                        var verboseErrors = !VesselsUnableToLoad.Contains(vesselProto.VesselId);
+                        var verboseErrors = !VesselsUnableToLoad.Contains(vesselId);
                         if (protoVessel == null || !protoVessel.Validate(verboseErrors) || protoVessel.HasInvalidParts(verboseErrors))
                         {
-                            VesselsUnableToLoad.Add(vesselProto.VesselId);
+                            VesselsUnableToLoad.Add(vesselId);
                             continue;
                         }
 
-                        VesselsUnableToLoad.Remove(vesselProto.VesselId);
+                        VesselsUnableToLoad.Remove(vesselId);
 
-                        var existingVessel = FlightGlobals.FindVessel(vesselProto.VesselId);
+                        var existingVessel = FlightGlobals.FindVessel(vesselId);
                         if (existingVessel == null)
                         {
                             if (VesselLoader.LoadVessel(protoVessel, forceReload))
                             {
                                 LunaLog.Log($"[LMP]: Vessel {protoVessel.vesselID} loaded");
+                                _lastAppliedProtoGameTime[vesselId] = protoGameTime;
                                 VesselLoadEvent.onLmpVesselLoaded.Fire(protoVessel.vesselRef);
                             }
                         }
@@ -158,6 +179,7 @@ namespace LmpClient.Systems.VesselProtoSys
                             if (VesselLoader.LoadVessel(protoVessel, forceReload))
                             {
                                 LunaLog.Log($"[LMP]: Vessel {protoVessel.vesselID} reloaded");
+                                _lastAppliedProtoGameTime[vesselId] = protoGameTime;
                                 VesselReloadEvent.onLmpVesselReloaded.Fire(protoVessel.vesselRef);
                             }
                         }
@@ -198,6 +220,7 @@ namespace LmpClient.Systems.VesselProtoSys
         public void RemoveVessel(Guid vesselId)
         {
             VesselProtos.TryRemove(vesselId, out _);
+            _lastAppliedProtoGameTime.TryRemove(vesselId, out _);
         }
 
         #endregion

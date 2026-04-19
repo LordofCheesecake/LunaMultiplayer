@@ -44,6 +44,12 @@ namespace Server.Server
 
         #endregion
 
+        /// <summary>
+        /// Called on the Lidgren receive thread. Deserializes the raw inbound bytes into a pooled
+        /// <see cref="IClientMessageBase"/> and hands off to the client's per-client receive worker via
+        /// <see cref="ClientStructure.EnqueueReceivedMessage"/>. Keeping the Lidgren thread lean avoids head-of-line
+        /// blocking across unrelated clients when a single client's handler path is slow.
+        /// </summary>
         public void ReceiveCallback(ClientStructure client, NetIncomingMessage msg)
         {
             if (client == null || msg.LengthBytes <= 1) return;
@@ -51,35 +57,69 @@ namespace Server.Server
             if (client.ConnectionStatus == ConnectionStatus.Connected)
                 client.LastReceiveTime = ServerContext.ServerClock.ElapsedMilliseconds;
 
+            // Per-client rate limit: stops a misbehaving client from flooding the receive thread.
+            if (!client.TryConsumeInboundToken())
+            {
+                // Drop silently; counter (RateLimitedMessages) is visible for diagnostics.
+                return;
+            }
+
             var message = DeserializeMessage(msg);
             if (message == null) return;
 
-            LmpPluginHandler.FireOnMessageReceived(client, message);
-            //A plugin has handled this message and requested suppression of the default behavior
-            if (message.Handled) return;
+            client.EnqueueReceivedMessage(message);
+        }
 
-            if (message.VersionMismatch)
-            {
-                MessageQueuer.SendConnectionEnd(client, $"Version mismatch: Your version ({message.Data.MajorVersion}.{message.Data.MinorVersion}.{message.Data.BuildVersion}) " +
-                                                        $"does not match the server version: {LmpVersioning.CurrentVersion}.");
-                return;
-            }
+        /// <summary>
+        /// Runs on the client's receive worker task. Performs plugin fire, version/auth checks, then dispatches
+        /// to the appropriate <see cref="ReaderBase"/> handler. Wrapper-only recycle in the finally; see comment
+        /// in <see cref="MessageReceiver"/> about shared <see cref="LmpCommon.Message.Interface.IMessageData"/>.
+        /// </summary>
+        public void DispatchDeserializedMessage(ClientStructure client, IClientMessageBase message)
+        {
+            if (client == null || message == null) return;
 
-            //Clients can only send HANDSHAKE until they are Authenticated.
-            if (!client.Authenticated && message.MessageType != ClientMessageType.Handshake)
-            {
-                MessageQueuer.SendConnectionEnd(client, $"You must authenticate before sending a {message.MessageType} message");
-                return;
-            }
-
-            //Handle the message
             try
             {
-                HandlerDictionary[message.MessageType].HandleMessage(client, message);
+                LmpPluginHandler.FireOnMessageReceived(client, message);
+                //A plugin has handled this message and requested suppression of the default behavior
+                if (message.Handled) return;
+
+                if (message.VersionMismatch)
+                {
+                    MessageQueuer.SendConnectionEnd(client, $"Version mismatch: Your version ({message.Data.MajorVersion}.{message.Data.MinorVersion}.{message.Data.BuildVersion}) " +
+                                                            $"does not match the server version: {LmpVersioning.CurrentVersion}.");
+                    return;
+                }
+
+                //Clients can only send HANDSHAKE until they are Authenticated.
+                if (!client.Authenticated && message.MessageType != ClientMessageType.Handshake)
+                {
+                    MessageQueuer.SendConnectionEnd(client, $"You must authenticate before sending a {message.MessageType} message");
+                    return;
+                }
+
+                //Handle the message
+                try
+                {
+                    HandlerDictionary[message.MessageType].HandleMessage(client, message);
+                    client.ConsecutiveHandlerFailures = 0;
+                }
+                catch (Exception e)
+                {
+                    LunaLog.Error($"Error handling a {message.MessageType} message from {client.PlayerName}! {e}");
+                    client.ConsecutiveHandlerFailures++;
+
+                    if (client.ConsecutiveHandlerFailures >= ClientStructure.PoisonMessageDisconnectThreshold)
+                    {
+                        LunaLog.Warning($"Disconnecting {client.PlayerName}: exceeded poison-message threshold ({client.ConsecutiveHandlerFailures} consecutive handler failures)");
+                        MessageQueuer.SendConnectionEnd(client, "Too many malformed messages");
+                    }
+                }
             }
-            catch (Exception e)
+            finally
             {
-                LunaLog.Error($"Error handling a message from {client.PlayerName}! {e}");
+                message.RecycleWrapperOnly();
             }
         }
 

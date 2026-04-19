@@ -76,7 +76,18 @@ namespace LmpClient.Network
 
         public static void ResetConnectionStaticsAndQueues()
         {
+            // Drain and recycle pending outgoing messages before swapping the queue so pooled instances
+            // don't just become unreachable references (which would starve the pool over many reconnects).
+            var oldQueue = NetworkSender.OutgoingMessages;
             NetworkSender.OutgoingMessages = new ConcurrentQueue<IMessageBase>();
+
+            if (oldQueue != null)
+            {
+                while (oldQueue.TryDequeue(out var msg))
+                {
+                    msg?.Recycle();
+                }
+            }
         }
 
         public static void AwakeNetworkSystem()

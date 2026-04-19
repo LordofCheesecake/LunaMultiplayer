@@ -1,73 +1,156 @@
-#Build this image with: docker build --file Dockerfile_Server -t lmpsrv:latest .
-#Delete the image with the command: docker image rm lmpsrv:latest
+# syntax=docker/dockerfile:1.7
+#
+# LunaMultiplayer server image.
+# Build/run recipes live in DOCKER.md.
+#
+# Requires BuildKit (enabled by default in modern Docker) for the `--mount`
+# cache directives. Multi-arch: linux/amd64, linux/arm64, linux/arm/v7.
 
-#Create a container with: docker run -td -p 8800:8800 -p 8900:8900 --name lmpsrv lmpsrv:latest
-# the -t (tty) flag is needed so docker can send SIGINT for proper shutdown.
-#Attach to a container with: docker exec -it lmpsrv /bin/ash
-#When inside a container, you can dettach with: CONTROL+P+Q
-#Check logs with: docker logs -f lmpsrv
+ARG DOTNET_SDK_VERSION=10.0-alpine
+# `-extra` variant ships ICU and tzdata. The server explicitly constructs
+# CultureInfo("en-US") and formats numbers/dates with InvariantCulture, so
+# the slimmer `10.0-alpine` image (globalization-invariant by default) would
+# crash at startup. ~20 MB larger; worth it.
+ARG DOTNET_RUNTIME_VERSION=10.0-alpine-extra
 
-#Stop a container with: docker stop lmpsrv
-#Start a container with: docker start lmpsrv
-#Remove a container with: docker container rm lmpsrv
+################################################################################
+# Stage: restore-base
+# Builds a thin "restored" layer: csproj + NuGet restore only. Keeping this
+# separate means source changes do not invalidate the NuGet download layer.
+################################################################################
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_SDK_VERSION} AS restore
+WORKDIR /src
 
-ARG OS_BASE=alpine
-ARG OS_VERSION=3.20
+ENV DOTNET_NOLOGO=1 \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
+    NUGET_XMLDOC_MODE=skip
 
-# SDK image: 10.0-alpine (10.0-alpine3.20 is not published on MCR for .NET 10).
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS base
+# Only the project graph that Server.csproj transitively needs.
+COPY .nuget                           .nuget
+COPY LmpCommon/LmpCommon.csproj       LmpCommon/LmpCommon.csproj
+COPY LmpGlobal/LmpGlobal.csproj       LmpGlobal/LmpGlobal.csproj
+COPY Lidgren/Lidgren.projitems        Lidgren/Lidgren.projitems
+COPY Lidgren.Core/Lidgren.Core.csproj Lidgren.Core/Lidgren.Core.csproj
+COPY Lidgren.Net/Lidgren.Net.csproj   Lidgren.Net/Lidgren.Net.csproj
+COPY uhttpsharp/uhttpsharp.csproj     uhttpsharp/uhttpsharp.csproj
+COPY LmpUpdater/LmpUpdater.csproj     LmpUpdater/LmpUpdater.csproj
+COPY Server/Server.csproj             Server/Server.csproj
 
-COPY .nuget                           /LunaMultiplayer/.nuget
-COPY LmpCommon/LmpCommon.csproj       /LunaMultiplayer/LmpCommon/LmpCommon.csproj
-COPY LmpGlobal/LmpGlobal.csproj       /LunaMultiplayer/LmpGlobal/LmpGlobal.csproj
-COPY Lidgren/Lidgren.projitems        /LunaMultiplayer/Lidgren/Lidgren.projitems
-COPY Lidgren.Core/Lidgren.Core.csproj /LunaMultiplayer/Lidgren.Core/Lidgren.Core.csproj
-COPY Lidgren.Net/Lidgren.Net.csproj   /LunaMultiplayer/Lidgren.Net/Lidgren.Net.csproj
-COPY uhttpsharp/uhttpsharp.csproj     /LunaMultiplayer/uhttpsharp/uhttpsharp.csproj
-COPY LmpUpdater/LmpUpdater.csproj     /LunaMultiplayer/LmpUpdater/LmpUpdater.csproj
-COPY Server/Server.csproj             /LunaMultiplayer/Server/Server.csproj
-
-ARG OS_BASE
-ARG OS_VERSION
 ARG TARGETARCH
 ARG TARGETVARIANT
-# Portable musl RIDs (.NET 8+); versioned alpine.* RIDs are not recognized (NETSDK1083).
-RUN case "${TARGETARCH}" in \
-    amd64) DOTNET_RID=linux-musl-x64 ;; \
-    arm64) DOTNET_RID=linux-musl-arm64 ;; \
-    arm) DOTNET_RID=linux-musl-arm ;; \
-    *) echo "Unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
-  esac && \
-  cd /LunaMultiplayer/Server && \
-  dotnet restore -r ${DOTNET_RID}
 
-COPY . /LunaMultiplayer
+# BuildKit cache mount for NuGet: survives across builds, shared across arches.
+# `sharing=locked` because concurrent arch builds could otherwise race on the
+# same package extraction.
+RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
+    set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) RID=linux-musl-x64 ;; \
+      arm64) RID=linux-musl-arm64 ;; \
+      arm)   RID=linux-musl-arm ;; \
+      *)     echo "Unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    echo "${RID}" > /tmp/rid; \
+    dotnet restore Server/Server.csproj -r "${RID}"
 
-FROM base AS debug
-WORKDIR /LunaMultiplayer/Server
-ENV DOTNET_PerfMapEnabled=1
-ENV COMPlus_PerfMapEnabled=1
-CMD [ "/bin/ash" ]
+################################################################################
+# Stage: build
+# Adds the rest of the source and publishes a self-contained server.
+################################################################################
+FROM restore AS build
+WORKDIR /src
 
-FROM --platform=$BUILDPLATFORM base AS builder
-WORKDIR /LunaMultiplayer/Server
-ARG OS_BASE
-ARG OS_VERSION
+COPY . .
+
 ARG TARGETARCH
 ARG TARGETVARIANT
-RUN case "${TARGETARCH}" in \
-    amd64) DOTNET_RID=linux-musl-x64 ;; \
-    arm64) DOTNET_RID=linux-musl-arm64 ;; \
-    arm) DOTNET_RID=linux-musl-arm ;; \
-    *) echo "Unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
-  esac && \
-  dotnet publish -c Release -r ${DOTNET_RID} --self-contained true -o Publish
 
-FROM ${OS_BASE}:${OS_VERSION}
-RUN apk add icu-libs libstdc++ libgcc
-COPY --from=builder /LunaMultiplayer/Server/Publish/ /LMPServer/
-EXPOSE 8800/udp 8900/tcp
-VOLUME "/LMPServer/Config" "/LMPServer/Plugins" "/LMPServer/Universe" "/LMPServer/logs"
-STOPSIGNAL SIGINT
+RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
+    set -eux; \
+    RID="$(cat /tmp/rid)"; \
+    dotnet publish Server/Server.csproj \
+      -c Release \
+      -r "${RID}" \
+      --self-contained true \
+      --no-restore \
+      -p:DebugType=embedded \
+      -p:PublishSingleFile=false \
+      -o /publish; \
+    # The app serializes config/logs under these directories at runtime; make
+    # sure they exist in the image so the non-root user can write to them.
+    mkdir -p /publish/Config /publish/Plugins /publish/Universe /publish/logs
+
+################################################################################
+# Stage: debug
+# Interactive SDK shell with the source tree available. Not used in production.
+#   docker build --target debug -t lmpsrv:debug -f Dockerfile_Server .
+#   docker run --rm -it lmpsrv:debug
+################################################################################
+FROM build AS debug
+WORKDIR /src/Server
+ENV DOTNET_PerfMapEnabled=1 \
+    COMPlus_PerfMapEnabled=1
+CMD ["/bin/ash"]
+
+################################################################################
+# Stage: runtime
+# Minimal image containing only the runtime dependencies and the self-contained
+# publish output. Uses Microsoft's `runtime-deps` image which is purpose-built
+# for self-contained .NET apps (includes ICU, libstdc++, libgcc, CA certs).
+################################################################################
+FROM mcr.microsoft.com/dotnet/runtime-deps:${DOTNET_RUNTIME_VERSION} AS runtime
+
+# `-extra` base already ships ICU + tzdata. We only upgrade for CVE hygiene.
+# `--no-cache` skips persisting the apk index in the layer.
+RUN apk upgrade --no-cache
+
+# Non-root user - containers should not run as UID 0. UID 1000 matches the
+# default on most Linux hosts which makes bind-mount ownership predictable.
+ARG LMP_UID=1000
+ARG LMP_GID=1000
+RUN addgroup -g ${LMP_GID} -S lmp \
+ && adduser  -u ${LMP_UID} -G lmp -S -h /LMPServer lmp
+
 WORKDIR /LMPServer
-CMD ./Server
+COPY --from=build --chown=lmp:lmp /publish/ /LMPServer/
+
+# Runtime tuning:
+# - DOTNET_EnableDiagnostics=0: no diagnostic IPC pipe in production containers.
+# - DOTNET_gcServer=1: explicit; also set in Server.csproj. Defensive.
+# - DOTNET_NOLOGO: silence first-run banner if SDK ever executes here.
+ENV DOTNET_NOLOGO=1 \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_EnableDiagnostics=0 \
+    DOTNET_gcServer=1 \
+    # Belt-and-braces: the `-extra` image ships ICU and sets this to false
+    # already; we pin it explicitly so a later base swap can't silently turn
+    # invariant mode back on (the server would then crash on CultureInfo).
+    DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false \
+    ASPNETCORE_URLS=
+
+USER lmp:lmp
+
+EXPOSE 8800/udp 8900/tcp
+
+# These directories are config/state and should be persisted by the operator.
+VOLUME ["/LMPServer/Config", "/LMPServer/Plugins", "/LMPServer/Universe", "/LMPServer/logs"]
+
+# SIGINT is what the server's exit handler listens for (ClientMainThread +
+# ExitSignal). Docker sends SIGTERM by default, so override.
+STOPSIGNAL SIGINT
+
+# Basic liveness probe: the built-in HTTP admin server runs on :8900 when
+# enabled. Feel free to remove if the HTTP endpoint is disabled in your deploy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1:8900/ || exit 1
+
+# Exec form so SIGINT reaches the process directly instead of a shell wrapper.
+CMD ["./Server"]
+
+# OCI image metadata; consumed by GHCR, docker inspect, scanners.
+LABEL org.opencontainers.image.title="LunaMultiplayer Server" \
+      org.opencontainers.image.description="Multiplayer game server for Kerbal Space Program" \
+      org.opencontainers.image.source="https://github.com/LunaMultiplayer/LunaMultiplayer" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="LunaMultiplayer"

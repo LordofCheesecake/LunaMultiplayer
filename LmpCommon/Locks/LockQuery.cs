@@ -49,7 +49,9 @@ namespace LmpCommon.Locks
         }
 
         /// <summary>
-        /// Checks if the vessel based lock exists
+        /// Checks if the vessel based lock exists. Spectator is an always-existing "a player is spectating"
+        /// indicator keyed on player name; this overload takes no player name so we treat Spectator as
+        /// "any spectator lock exists".
         /// </summary>
         public bool LockExists(LockType type, Guid vesselId, string kerbalName)
         {
@@ -65,6 +67,8 @@ namespace LmpCommon.Locks
                     return LockStore.UpdateLocks.ContainsKey(vesselId);
                 case LockType.UnloadedUpdate:
                     return LockStore.UnloadedUpdateLocks.ContainsKey(vesselId);
+                case LockType.Spectator:
+                    return !LockStore.SpectatorLocks.IsEmpty;
                 case LockType.Contract:
                     return LockStore.ContractLock != null;
                 default:
@@ -168,7 +172,8 @@ namespace LmpCommon.Locks
                 case LockType.Spectator:
                     return LockStore.SpectatorLocks.ContainsKey(lockDefinition.PlayerName);
                 case LockType.Kerbal:
-                    return LockStore.SpectatorLocks.ContainsKey(lockDefinition.KerbalName);
+                    // Previously queried SpectatorLocks (copy-paste bug) which silently returned wrong results.
+                    return LockStore.KerbalLocks.ContainsKey(lockDefinition.KerbalName);
                 case LockType.Contract:
                     return LockStore.ContractLock != null;
                 default:

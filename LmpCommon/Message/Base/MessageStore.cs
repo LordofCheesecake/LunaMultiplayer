@@ -20,12 +20,32 @@ namespace LmpCommon.Message.Base
 
         internal static void RecycleMessage(IMessageBase message)
         {
+            // Idempotent: Recycle may be called both by a handler (for custom teardown) and by a central
+            // try/finally in the network receive path. If Data is already null, the wrapper has been recycled
+            // once already - don't double-recycle which would duplicate pool entries and later hand out the
+            // same instance to two concurrent consumers.
+            if (message == null || message.Data == null) return;
+
             if (!MessageDataDictionary.TryGetValue(message.Data.ClassName, out var dataBag))
             {
                 dataBag = new ConcurrentBag<IMessageData>();
                 MessageDataDictionary.TryAdd(message.Data.ClassName, dataBag);
             }
             dataBag.Add(message.Data);
+
+            message.SetData(null);
+
+            RecycleWrapper(message);
+        }
+
+        /// <summary>
+        /// Returns only the wrapper to the pool without recycling its <see cref="IMessageData"/>. Needed for broadcast
+        /// relay paths where multiple per-client wrappers share a single <see cref="IMessageData"/> that must remain
+        /// live until the send queue has serialized it.
+        /// </summary>
+        internal static void RecycleWrapper(IMessageBase message)
+        {
+            if (message == null) return;
 
             message.SetData(null);
 
