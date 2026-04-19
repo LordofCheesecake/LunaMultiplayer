@@ -144,9 +144,9 @@ namespace Server.Client
         }
 
         /// <summary>
-        /// Count of consecutive handler exceptions observed for this client. Reset on any successful handle.
-        /// If it crosses <see cref="PoisonMessageDisconnectThreshold"/> the client is dropped; protects the
-        /// server against a buggy/malicious client producing infinite error log spam.
+        /// Count of consecutive inbound deserialization failures for this client. Reset after a successful parse
+        /// on the inbound network path. If it crosses
+        /// <see cref="PoisonMessageDisconnectThreshold"/> the client is dropped (malformed wire protocol).
         /// </summary>
         public int ConsecutiveHandlerFailures { get; set; }
 

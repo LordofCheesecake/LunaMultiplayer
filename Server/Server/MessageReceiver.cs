@@ -64,9 +64,10 @@ namespace Server.Server
                 return;
             }
 
-            var message = DeserializeMessage(msg);
-            if (message == null) return;
+            if (!TryDeserializeInboundMessage(msg, client, out var message))
+                return;
 
+            client.ConsecutiveHandlerFailures = 0;
             client.EnqueueReceivedMessage(message);
         }
 
@@ -99,22 +100,14 @@ namespace Server.Server
                     return;
                 }
 
-                //Handle the message
+                //Handle the message (handler bugs are logged but do not contribute to deserialization poison counter).
                 try
                 {
                     HandlerDictionary[message.MessageType].HandleMessage(client, message);
-                    client.ConsecutiveHandlerFailures = 0;
                 }
                 catch (Exception e)
                 {
                     LunaLog.Error($"Error handling a {message.MessageType} message from {client.PlayerName}! {e}");
-                    client.ConsecutiveHandlerFailures++;
-
-                    if (client.ConsecutiveHandlerFailures >= ClientStructure.PoisonMessageDisconnectThreshold)
-                    {
-                        LunaLog.Warning($"Disconnecting {client.PlayerName}: exceeded poison-message threshold ({client.ConsecutiveHandlerFailures} consecutive handler failures)");
-                        MessageQueuer.SendConnectionEnd(client, "Too many malformed messages");
-                    }
                 }
             }
             finally
@@ -123,17 +116,46 @@ namespace Server.Server
             }
         }
 
-        private static IClientMessageBase DeserializeMessage(NetIncomingMessage msg)
+        /// <summary>
+        /// Deserializes an inbound client message. On failure, increments
+        /// <see cref="ClientStructure.ConsecutiveHandlerFailures"/> (deserialization poison counter) and may disconnect.
+        /// </summary>
+        private static bool TryDeserializeInboundMessage(NetIncomingMessage msg, ClientStructure client, out IClientMessageBase message)
         {
+            message = null;
             try
             {
-                return ServerContext.ClientMessageFactory.Deserialize(msg, LunaNetworkTime.UtcNow.Ticks) as IClientMessageBase;
+                var deserialized = ServerContext.ClientMessageFactory.Deserialize(msg, LunaNetworkTime.UtcNow.Ticks);
+                message = deserialized as IClientMessageBase;
+                if (message == null)
+                {
+                    deserialized?.Recycle();
+                    LunaLog.Error("Deserialized inbound payload is not a client message type");
+                    ReportInboundDeserializationPoison(client);
+                    return false;
+                }
+
+                return true;
             }
             catch (Exception e)
             {
                 LunaLog.Error($"Error deserializing message! {e}");
-                return null;
+                ReportInboundDeserializationPoison(client);
+                return false;
             }
+        }
+
+        private static void ReportInboundDeserializationPoison(ClientStructure client)
+        {
+            if (client == null)
+                return;
+
+            client.ConsecutiveHandlerFailures++;
+            if (client.ConsecutiveHandlerFailures < ClientStructure.PoisonMessageDisconnectThreshold)
+                return;
+
+            LunaLog.Warning($"Disconnecting {client.PlayerName}: exceeded poison-message threshold ({client.ConsecutiveHandlerFailures} consecutive deserialization failures)");
+            MessageQueuer.SendConnectionEnd(client, "Too many malformed messages");
         }
     }
 }

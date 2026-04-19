@@ -3,6 +3,7 @@ using LmpCommon.Message.Data.Kerbal;
 using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
 using Server.Client;
+using Server.Log;
 using Server.Message.Base;
 using Server.System;
 
@@ -27,8 +28,12 @@ namespace Server.Message
                     KerbalSystem.HandleKerbalRemove(client, (KerbalRemoveMsgData)data);
 
                     break;
+                case KerbalMessageType.Reply:
+                    // Server-originated; ignore if a client ever sends it (older protocol quirks).
+                    return;
                 default:
-                    throw new NotImplementedException("Kerbal type not implemented");
+                    LunaLog.Debug($"Ignoring Kerbal message subtype {data?.KerbalMessageType} from {client.PlayerName}");
+                    return;
             }
         }
     }

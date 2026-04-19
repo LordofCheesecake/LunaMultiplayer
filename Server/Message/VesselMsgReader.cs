@@ -109,7 +109,8 @@ namespace Server.Message
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
                 default:
-                    throw new NotImplementedException("Vessel message type not implemented");
+                    LunaLog.Debug($"Ignoring vessel message subtype {messageData?.VesselMessageType} from {client.PlayerName}");
+                    break;
             }
         }
 
