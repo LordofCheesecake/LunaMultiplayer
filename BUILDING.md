@@ -1,10 +1,12 @@
 # Building and Installing LMP on Windows
 
+For a full overview (installing from a release zip vs. cloning this repo, and populating `External\KSPLibraries` without the password-protected archive), see **[INSTALL.md](INSTALL.md)**.
+
 ## Prerequisites
 
 Install the following on your Windows machine:
 
-1. **[.NET SDK](https://dotnet.microsoft.com/download)** — version 8, 9, or 10 all work.
+1. **[.NET SDK 10.x](https://dotnet.microsoft.com/download/dotnet/10.0)** — required by `global.json` and project references to `net10.0` (e.g. `LmpCommon`, `Lidgren.Core`). Older SDKs cannot restore the whole solution.
 2. **[.NET Framework 4.7.2 Developer Pack](https://dotnet.microsoft.com/download/dotnet-framework/net472)** — provides the `net472` reference assemblies that `LmpClient` targets.
 3. **[Git for Windows](https://git-scm.com/download/win)** — to clone the repository.
 
