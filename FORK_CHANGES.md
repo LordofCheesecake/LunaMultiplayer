@@ -85,6 +85,15 @@ Reverts or adjusts four areas from 0.29.2/0.29.3 that broke stock peers (vessel 
 
 Wire format and relay semantics unchanged for stock **0.29.x** compatibility.
 
+### Integration — upstream `master` + `Release/0_29_2`, merged to default branch (v0.29.6)
+
+- **`upstream/master`**: translations, Swedish loc edits, Linux build script (`Scripts/build-lmp-projects.sh`), KSC/tracking station vessel-list coalescing perf, NAT/buffer tuning, timewarp cap on `WarpMode.None`, maneuver-related client churn, GeoIP tweaks on master server, AppVeyor/README/docs, `.gitignore` cleanup, and other isolated fixes.
+- **`upstream/Release/0_29_2`**: Harmony UTC date clamp, contract/scenario client + server churn (sanitizers, migrations, achievements crew dedupe), `DiscoveryInfoSanitizer`, richer `VesselLoader`, logging helpers, `StartLunaServer.bat`, and matching tests where present.
+- **Tier A retained (fork “wins” on interop)** — unchanged intent vs `.cursor/skills/lmp-stock-client-interop/SKILL.md`: `Server/Message/VesselMsgReader.cs`, `Server/System/WarpSystemReceiver.cs`, `VesselCliMsg` / `VesselSrvMsg` (reliable vessel channel **8**), and centralized recycle / deserialization-only poison policy; no regressions to relay-only vessel subtypes, proto relay when disk write is skipped, or subspace force-sync.
+- **Build alignment post-merge**: `Server` on **net10.0** with `LmpCommon` project reference; fork `LidgrenServer` / `LidgrenMasterServer` surface restored; `ServerTest` → net10.0; `LmpClient` references `LmpCommon.csproj` / `LmpGlobal.csproj` and includes `DockingPortUtil.cs`; small API glue (`SendScenarioModuleImmediate`, `DelayedSendVesselMessage` optional `reason`).
+
+Tagged **v0.29.6**.
+
 ---
 
-Current fork version in `LunaMultiplayer.version`: **0.29.5** (PATCH may change; re-open this file or run `git log` above after new tags).
+Current fork version in `LunaMultiplayer.version`: **0.29.6** (PATCH may change; re-open this file or run `git log` above after new tags).
