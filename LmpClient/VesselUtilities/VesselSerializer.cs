@@ -66,6 +66,8 @@ namespace LmpClient.VesselUtilities
                 // transitions (e.g. closing Mission Control), leaving the UI stuck in a half-closed state.
                 StripUnknownPartData(inputNode, protoVesselId);
 
+                DiscoveryInfoSanitizer.SanitizeVesselNode(inputNode, protoVesselId, "wire ConfigNode");
+
                 //Cannot reuse the Protovessel to save memory garbage as it does not have any clear method :(
                 return new ProtoVessel(inputNode, HighLogic.CurrentGame);
             }

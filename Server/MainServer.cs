@@ -42,6 +42,8 @@ namespace Server
 
         public static async Task Main()
         {
+            DotNetRuntimeChecker.EnsureCorrectRuntimeOrExit();
+
             try
             {
                 // Force culture to en-US to avoid 'System.Net.Sockets.resources' assembly load error.
@@ -154,6 +156,7 @@ namespace Server
             LunaLog.Debug("Loading settings...");
             SettingsHandler.LoadSettings();
             SettingsHandler.ValidateDifficultySettings();
+            DefaultSettingsChecker.WarnIfUsingDefaults();
 
             if (GeneralSettings.SettingsStore.ModControl)
             {

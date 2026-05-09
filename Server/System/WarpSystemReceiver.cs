@@ -38,6 +38,8 @@ namespace Server.System
 
                 LunaLog.Debug($"{client.PlayerName} created the new subspace '{WarpContext.NextSubspaceId}'");
 
+                var previousLatestSubspaceTime = WarpContext.LatestSubspace?.Time ?? 0d;
+
                 //Create Subspace
                 WarpContext.Subspaces.TryAdd(WarpContext.NextSubspaceId, new Subspace(WarpContext.NextSubspaceId, serverTimeDifference, client.PlayerName));
 
@@ -49,6 +51,9 @@ namespace Server.System
 
                 MessageQueuer.SendToAllClients<WarpSrvMsg>(msgData);
                 WarpContext.NextSubspaceId++;
+
+                var deltaSeconds = serverTimeDifference - previousLatestSubspaceTime;
+                WarpAllotmentTracker.RecordWarp(client.UniqueIdentifier, client.PlayerName, deltaSeconds);
             }
         }
 

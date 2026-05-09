@@ -73,6 +73,8 @@ namespace LmpClient.VesselUtilities
             foreach (var snapshot in vesselProto.protoPartSnapshots)
                 snapshot.protoModuleCrew?.RemoveAll(c => c == null);
 
+            DiscoveryInfoSanitizer.EnsureSafeDiscoveryInfo(vesselProto);
+
             try
             {
                 vesselProto.Load(HighLogic.CurrentGame.flightState);
