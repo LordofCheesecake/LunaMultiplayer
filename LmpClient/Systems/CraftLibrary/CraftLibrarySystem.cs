@@ -1,4 +1,4 @@
-using LmpClient.Base;
+﻿using LmpClient.Base;
 using LmpClient.Localization;
 using LmpClient.Systems.SettingsSys;
 using LmpClient.Utilities;
@@ -10,8 +10,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace LmpClient.Systems.CraftLibrary
 {
@@ -22,12 +20,11 @@ namespace LmpClient.Systems.CraftLibrary
         private static readonly string SaveFolder = CommonUtil.CombinePaths(MainSystem.KspPath, "saves", "LunaMultiplayer");
 
         private static DateTime _lastRequest = DateTime.MinValue;
-        private static readonly SemaphoreSlim _craftIoSemaphore = new SemaphoreSlim(1, 1);
 
         public ConcurrentDictionary<string, ConcurrentDictionary<string, CraftBasicEntry>> CraftInfo { get; } = new ConcurrentDictionary<string, ConcurrentDictionary<string, CraftBasicEntry>>();
         public ConcurrentDictionary<string, ConcurrentDictionary<string, CraftEntry>> CraftDownloaded { get; } = new ConcurrentDictionary<string, ConcurrentDictionary<string, CraftEntry>>();
 
-        public List<CraftEntry> OwnCrafts { get; private set; } = new List<CraftEntry>();
+        public List<CraftEntry> OwnCrafts { get; } = new List<CraftEntry>();
 
         public ConcurrentQueue<string> DownloadedCraftsNotification { get; } = new ConcurrentQueue<string>();
         public List<string> FoldersWithNewContent { get; } = new List<string>();
@@ -67,12 +64,12 @@ namespace LmpClient.Systems.CraftLibrary
         #region Public methods
 
         /// <summary>
-        /// Refreshes the list of our own crafts in the background
+        /// Refreshes the list of our own crafts
         /// </summary>
         public void RefreshOwnCrafts()
         {
             OwnCrafts.Clear();
-            
+
             LoadCraftsFromFolder(CommonUtil.CombinePaths(SaveFolder, "Ships", "VAB"), CraftType.Vab);
             LoadCraftsFromFolder(CommonUtil.CombinePaths(SaveFolder, "Ships", "SPH"), CraftType.Sph);
             LoadCraftsFromFolder(CommonUtil.CombinePaths(SaveFolder, "Subassemblies"), CraftType.Subassembly);
@@ -102,46 +99,31 @@ namespace LmpClient.Systems.CraftLibrary
         }
 
         /// <summary>
-        /// Saves a craft to the hard drive asynchronously
+        /// Saves a craft to the hard drive
         /// </summary>
         public void SaveCraftToDisk(CraftEntry craft)
         {
-            Task.Run(async () =>
+            string folder;
+            switch (craft.CraftType)
             {
-                await _craftIoSemaphore.WaitAsync();
-                try
-                {
-                    string folder;
-                    switch (craft.CraftType)
-                    {
-                        case CraftType.Vab:
-                            folder = CommonUtil.CombinePaths(SaveFolder, "Ships", "VAB");
-                            break;
-                        case CraftType.Sph:
-                            folder = CommonUtil.CombinePaths(SaveFolder, "Ships", "SPH");
-                            break;
-                        case CraftType.Subassembly:
-                            folder = CommonUtil.CombinePaths(SaveFolder, "Subassemblies");
-                            break;
-                        default:
-                            throw new ArgumentOutOfRangeException();
-                    }
+                case CraftType.Vab:
+                    folder = CommonUtil.CombinePaths(SaveFolder, "Ships", "VAB");
+                    break;
+                case CraftType.Sph:
+                    folder = CommonUtil.CombinePaths(SaveFolder, "Ships", "SPH");
+                    break;
+                case CraftType.Subassembly:
+                    folder = CommonUtil.CombinePaths(SaveFolder, "Subassemblies");
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
 
-                    var path = CommonUtil.CombinePaths(folder, $"{craft.CraftName}.craft");
-                    File.WriteAllBytes(path, craft.CraftData);
+            var path = CommonUtil.CombinePaths(folder, $"{craft.CraftName}.craft");
+            File.WriteAllBytes(path, craft.CraftData);
 
-                    //Add it to the queue notification as we are in another thread
-                    DownloadedCraftsNotification.Enqueue(craft.CraftName);
-                }
-                catch (Exception ex)
-                {
-                    LunaLog.LogError($"[LMP]: Error saving craft to disk: {ex.Message}");
-                }
-                finally
-                {
-                    _craftIoSemaphore.Release();
-                }
-            });
+            //Add it to the queue notification as we are in another thread
+            DownloadedCraftsNotification.Enqueue(craft.CraftName);
         }
 
         /// <summary>

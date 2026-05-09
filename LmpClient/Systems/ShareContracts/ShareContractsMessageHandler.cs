@@ -12,7 +12,6 @@ using LmpCommon.Message.Interface;
 using LmpCommon.Message.Types;
 using System;
 using System.Collections.Concurrent;
-using UnityEngine;
 
 namespace LmpClient.Systems.ShareContracts
 {
@@ -50,8 +49,6 @@ namespace LmpClient.Systems.ShareContracts
 
         private static void ContractUpdate(ContractInfo[] contractInfos)
         {
-            LunaLog.Log($"[ShareContracts]: Syncing {contractInfos.Length} contract(s).");
-
             //Don't listen to these events for the time this message is processing.
             System.StartIgnoringEvents();
             ShareFundsSystem.Singleton.StartIgnoringEvents();
@@ -59,17 +56,10 @@ namespace LmpClient.Systems.ShareContracts
             ShareReputationSystem.Singleton.StartIgnoringEvents();
             ShareExperimentalPartsSystem.Singleton.StartIgnoringEvents();
 
-            var failedCount = 0;
             foreach (var cInfo in contractInfos)
             {
                 var incomingContract = ConvertByteArrayToContract(cInfo.Data, cInfo.NumBytes);
-                if (incomingContract == null)
-                {
-                    failedCount++;
-                    continue;
-                }
-
-                LunaLog.Log($"[ShareContracts]: Contract - GUID: {incomingContract.ContractGuid} | Title: {incomingContract.Title} | Type: {incomingContract.GetType().Name} | State: {incomingContract.ContractState}");
+                if (incomingContract == null) continue;
 
                 var contractIndex = ContractSystem.Instance.Contracts.FindIndex(c => c.ContractGuid == cInfo.ContractGuid);
 
@@ -91,16 +81,6 @@ namespace LmpClient.Systems.ShareContracts
             ShareScienceSystem.Singleton.StopIgnoringEvents(true);
             ShareReputationSystem.Singleton.StopIgnoringEvents(true);
             ShareExperimentalPartsSystem.Singleton.StopIgnoringEvents();
-
-            if (failedCount > 0)
-            {
-                LunaScreenMsg.PostScreenMessage(
-                    $"[LMP] {failedCount} contract(s) could not be loaded — missing parts or mods. Check KSP.log for details.",
-                    20f,
-                    ScreenMessageStyle.UPPER_LEFT,
-                    Color.yellow);
-            }
-
             GameEvents.Contract.onContractsListChanged.Fire();
             System.StopIgnoringEvents();
         }
@@ -128,29 +108,37 @@ namespace LmpClient.Systems.ShareContracts
                 return null;
             }
 
-            // Extract identifying fields before modifying the node or attempting a load,
-            // so failure messages always include as much context as possible.
-            var contractTypeName = node.GetValue("type") ?? "Unknown";
-            var contractGuid = node.GetValue("guid") ?? "Unknown";
-            var partName = node.GetValue("part"); // Only present on PartTest contracts
+            var contractTypeName = node.GetValue("type");
+            node.RemoveValues("type");
+
+            var contractType = ContractSystem.GetContractType(contractTypeName);
+            if (contractType == null)
+            {
+                // Contract's C# type isn't registered in this KSP install (e.g. the mod
+                // that defines the contract class isn't installed on this client).
+                // Skip it cleanly rather than letting Activator.CreateInstance NRE.
+                LunaLog.Log($"[LMP]: Skipping contract with unknown type '{contractTypeName}'. The mod that defines it is likely not installed on this client.");
+                return null;
+            }
+
+            if (ContractPartReferenceChecker.TryFindUnknownPartReference(node, out var unknownPartName))
+            {
+                // A contract parameter (typically ContractConfigurator's PartValidation)
+                // references a part that PartLoader doesn't know about on this client.
+                // Rehydrating it would throw deep inside the parameter loader and spam
+                // the log with a stack trace; skip it cleanly instead.
+                LunaLog.Log($"[LMP]: Skipping contract '{contractTypeName}' because it references part '{unknownPartName}' which is not installed on this client.");
+                return null;
+            }
 
             Contract contract;
             try
             {
-                node.RemoveValues("type");
-                var contractType = ContractSystem.GetContractType(contractTypeName);
-                if (contractType == null)
-                {
-                    LunaLog.LogError($"[LMP]: Cannot load contract (GUID: {contractGuid}) — unknown type '{contractTypeName}'. Is a required contract mod missing?");
-                    return null;
-                }
-
                 contract = Contract.Load((Contract)Activator.CreateInstance(contractType), node);
             }
             catch (Exception e)
             {
-                var partDetail = partName != null ? $", requires part: '{partName}'" : "";
-                LunaLog.LogError($"[LMP]: Cannot load {contractTypeName} contract (GUID: {contractGuid}{partDetail}): {e.Message}");
+                LunaLog.LogError($"[LMP]: Error while deserializing contract: {e}");
                 return null;
             }
 
@@ -244,12 +232,7 @@ namespace LmpClient.Systems.ShareContracts
                         GameEvents.Contract.onFinished.Fire(ContractSystem.Instance.Contracts[contractIndex]);
                         break;
                     case Contract.State.Offered:
-                        // Do not fire the global onOffered event here. KSP systems such as
-                        // ContractPreLoader listen to it and enforce slot limits by withdrawing
-                        // existing server contracts when new ones are offered, which causes
-                        // contracts received in earlier batches to disappear. The Available tab
-                        // will still refresh because onContractsListChanged is fired at the end
-                        // of ContractUpdate(), which is all the UI needs.
+                        GameEvents.Contract.onOffered.Fire(ContractSystem.Instance.Contracts[contractIndex]);
                         break;
                     case Contract.State.Withdrawn:
                         GameEvents.Contract.onFinished.Fire(ContractSystem.Instance.Contracts[contractIndex]);

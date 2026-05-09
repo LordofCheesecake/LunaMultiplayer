@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 
@@ -7,16 +7,16 @@ using System.Runtime.CompilerServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("LMP")]
-[assembly: AssemblyCopyright("Copyright © 2018")]
+[assembly: AssemblyCopyright("Copyright � 2018")]
 [assembly: AssemblyTrademark("Gabriel Vazquez")]
 [assembly: AssemblyCulture("")]
 
 [assembly: ComVisible(false)]
 [assembly: Guid("cc8e38bb-d6d5-4bb9-ab74-a3a1a11ddc8d")]
 
-[assembly: AssemblyVersion("0.29.5")]
-[assembly: AssemblyFileVersion("0.29.5")]
-[assembly: AssemblyInformationalVersion("0.29.5-compiled")]
+[assembly: AssemblyVersion("0.29.6")]
+[assembly: AssemblyFileVersion("0.29.6")]
+[assembly: AssemblyInformationalVersion("0.29.6-compiled")]
 
 [assembly: TypeForwardedTo(typeof(LmpCommon.PlayerStatus))]
 [assembly: TypeForwardedTo(typeof(LmpCommon.Message.ClientMessageFactory))]

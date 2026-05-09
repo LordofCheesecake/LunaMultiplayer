@@ -3,6 +3,7 @@ using LmpClient.Systems.Lock;
 using LmpClient.Systems.SettingsSys;
 using LmpClient.VesselUtilities;
 using LmpCommon.Locks;
+using System.Diagnostics;
 
 namespace LmpClient.Systems.VesselLockSys
 {
@@ -57,12 +58,32 @@ namespace LmpClient.Systems.VesselLockSys
 
             if (data == GameScenes.FLIGHT || data == GameScenes.TRACKSTATION)
             {
-                //If we are going to flight scene or tracking station try to get as many unloaded update locks as possible
+                //Diagnostic: this foreach is the ignition for the lock-acquire
+                //flood that drives the TRACKSTATION entry stall. Each
+                //AcquireUnloadedUpdateLock send produces one network round-trip
+                //whose response fires LockEvent.onLockAcquire, which in turn
+                //fires KscSceneEvents.OnLockAcquire → RefreshTrackingStationVessels.
+                //Logging the count of sends + the elapsed wall-clock time of the
+                //foreach itself gives us the upper bound on how many TS rebuilds
+                //will be triggered as the responses arrive over the next few
+                //seconds. One-shot log (not bucketed) because this fires exactly
+                //once per scene entry and is too valuable to aggregate away.
+                var t0 = Stopwatch.GetTimestamp();
+                var totalVessels = 0;
+                var sentAcquires = 0;
                 foreach (var vessel in FlightGlobals.Vessels)
                 {
+                    totalVessels++;
                     if (!LockSystem.LockQuery.UnloadedUpdateLockExists(vessel.id))
+                    {
                         LockSystem.Singleton.AcquireUnloadedUpdateLock(vessel.id);
+                        sentAcquires++;
+                    }
                 }
+                var elapsedMs = (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
+                LunaLog.Log($"[LMP][TS-PROFILE] LevelLoaded({data}) lock-acquire foreach: " +
+                            $"vessels={totalVessels} acquireSends={sentAcquires} elapsedMs={elapsedMs:F1} " +
+                            $"(expect up to {sentAcquires} TS rebuilds as responses arrive)");
             }
             else
             {
@@ -95,16 +116,11 @@ namespace LmpClient.Systems.VesselLockSys
                     {
                         if (VesselCommon.IsSpectating)
                         {
-                            var spectatedVessel = FlightGlobals.FindVessel(lockDefinition.VesselId);
-
-                            // Remove the FlyByWire callback FIRST so the next physics tick cannot
-                            // overwrite our throttle zero with the previous controller's last state.
-                            VesselCommon.RemoveVesselFromSystems(lockDefinition.VesselId);
-
                             // Zero the vessel's throttle before removing the spectate input lock.
                             // The spectated vessel's ctrlState carries the previous controller's
                             // last-sent throttle; without clearing it the new controller instantly
                             // inherits full throttle on the frame the lock is granted.
+                            var spectatedVessel = FlightGlobals.FindVessel(lockDefinition.VesselId);
                             if (spectatedVessel != null)
                             {
                                 spectatedVessel.ctrlState.mainThrottle = 0f;
@@ -118,8 +134,7 @@ namespace LmpClient.Systems.VesselLockSys
 
                         //As we got the lock of that vessel, remove its FS and position updates
                         //This is done so even if the vessel has queued updates, we ignore them as we are controlling it
-                        if (!VesselCommon.IsSpectating) // already removed above if we were spectating
-                            VesselCommon.RemoveVesselFromSystems(lockDefinition.VesselId);
+                        VesselCommon.RemoveVesselFromSystems(lockDefinition.VesselId);
                     }
                     else
                     {

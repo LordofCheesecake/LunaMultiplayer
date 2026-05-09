@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Reflection;
+using LmpClient.Harmony;
 namespace LmpClient.Base
 {
     public static class HarmonyPatcher
@@ -9,7 +10,19 @@ namespace LmpClient.Base
         public static void Awake()
         {
             HarmonyInstance.PatchAll(Assembly.GetExecutingAssembly());
+            PatchManualTargets();
             PatchOptionalMods();
+        }
+
+        /// <summary>
+        /// Patches that cannot be expressed cleanly as <c>[HarmonyPatch]</c> attributes - typically because the
+        /// target is a non-public method that may not exist by the same name across KSP builds, or whose
+        /// parameter names may not survive in the shipped assembly. Manual registration lets us silently skip
+        /// missing targets instead of crashing LMP startup the way <c>PatchAll</c> would.
+        /// </summary>
+        private static void PatchManualTargets()
+        {
+            DefaultDateTimeFormatterClamp.Install(HarmonyInstance);
         }
 
         /// <summary>
@@ -19,46 +32,6 @@ namespace LmpClient.Base
         private static void PatchOptionalMods()
         {
             SuppressClickThroughBlockerPopup();
-            PatchContractPreLoader();
-        }
-
-        /// <summary>
-        /// Patches <c>ContractConfigurator.ContractPreLoader.OnLoad</c> with a prefix that
-        /// strips CONTRACT nodes containing unknown or malformed parameters before CC's
-        /// code iterates them.
-        ///
-        /// This must be done imperatively rather than via <c>[HarmonyPatch]</c> attributes
-        /// because <c>ContractPreLoader.OnLoad</c> is a virtual override of
-        /// <c>ScenarioModule.OnLoad</c>.  An attribute-based patch targeting the base class
-        /// method is never dispatched through for ContractPreLoader instances — the vtable
-        /// jumps directly to the derived-class body, bypassing our patch entirely.
-        /// </summary>
-        internal static void PatchContractPreLoader()
-        {
-            try
-            {
-                var ccplType = HarmonyLib.AccessTools.TypeByName("ContractConfigurator.ContractPreLoader");
-                if (ccplType == null)
-                {
-                    LunaLog.Log("[LMP]: ContractConfigurator.ContractPreLoader type not found — CC not installed, skipping contract pre-filter patch.");
-                    return;
-                }
-
-                var onLoad = HarmonyLib.AccessTools.Method(ccplType, "OnLoad");
-                if (onLoad == null)
-                {
-                    LunaLog.LogWarning("[LMP]: ContractPreLoader.OnLoad method not found — CC version mismatch?");
-                    return;
-                }
-
-                var prefix = new HarmonyLib.HarmonyMethod(typeof(LmpClient.Harmony.ContractPreLoader_Filter), "Prefix");
-                HarmonyInstance.Patch(onLoad, prefix: prefix);
-                LunaLog.Log("[LMP]: Patched ContractConfigurator.ContractPreLoader.OnLoad — invalid contracts will be filtered before CC loads them.");
-            }
-            catch (Exception e)
-            {
-                LunaLog.LogWarning($"[LMP]: Could not patch ContractPreLoader.OnLoad: {e.Message}");
-            }
         }
 
         /// <summary>

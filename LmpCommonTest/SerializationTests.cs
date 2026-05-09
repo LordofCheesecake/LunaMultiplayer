@@ -44,7 +44,6 @@ namespace LmpCommonTest
             msgData.Com[0] = 0;
             msgData.Com[1] = 0;
             msgData.Com[2] = 0;
-            msgData.BodyName = "Kerbin";
 
             var msg = Factory.CreateNew<VesselCliMsg>(msgData);
 
