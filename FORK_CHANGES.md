@@ -94,6 +94,13 @@ Wire format and relay semantics unchanged for stock **0.29.x** compatibility.
 
 Tagged **v0.29.6**.
 
+### Upstream branch triage (post-0.29.6 extras, v0.29.7)
+
+- **`upstream/geoip2-cleanup`** — merged (cherry-picked `d0cf8b5e`): dedicated `GeoIp2` helper with shared `WebServiceClient`, env vars `LMP_GEOIP2_ACCOUNT_ID` / `LMP_GEOIP2_LICENSE_KEY` (replacing ad-hoc GeoIP2 wiring in `IpLocate`), `IpLocate` REST-only, `Server.Update` uses `AddressCountries` before queueing refresh when country not yet set.
+- **`upstream/DrewBanyai/Contract_Fixup_041826`** — **not** merged: tip commit removes most of the scenario/share-contract stack (~800 lines deleted vs our tree) and documents that it “rebreaks contracts”; stock interop is unaffected but the fork keeps the integrated `Release/0_29_2` contract/scenario behavior.
+
+Tagged **v0.29.7** (after this entry).
+
 ---
 
-Current fork version in `LunaMultiplayer.version`: **0.29.6** (PATCH may change; re-open this file or run `git log` above after new tags).
+Current fork version in `LunaMultiplayer.version`: **0.29.7** (PATCH may change; re-open this file or run `git log` above after new tags).
