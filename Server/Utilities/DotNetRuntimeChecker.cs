@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -13,6 +13,8 @@ namespace Server.Utilities
     /// This check only runs after the native apphost has already succeeded in loading a
     /// runtime. If no compatible .NET is installed at all, apphost prints its own error
     /// and exits before any managed code (including this class) gets a chance to run.
+    /// The <c>StartLunaServer.bat</c> launcher that ships next to <c>Server.exe</c>
+    /// covers that earlier failure mode with a pre-flight check.
     /// </remarks>
     internal static class DotNetRuntimeChecker
     {
@@ -24,7 +26,7 @@ namespace Server.Utilities
         /// <summary>
         /// Friendly name of the required runtime, shown to the user if the check fails.
         /// </summary>
-        private const string RequiredRuntimeName = ".NET 10 Runtime";
+        private const string RequiredRuntimeName = ".NET 10.0 Runtime";
 
         /// <summary>
         /// Official Microsoft download page for the required runtime.
@@ -32,7 +34,8 @@ namespace Server.Utilities
         private const string RuntimeDownloadUrl = "https://dotnet.microsoft.com/en-us/download/dotnet/10.0";
 
         /// <summary>
-        /// Name of the shared framework the base .NET runtime ships under.
+        /// Name of the shared framework the base .NET runtime ships under. Helps distinguish the
+        /// base `Microsoft.NETCore.App` runtime from Desktop / ASP.NET packs or SDK-only listings.
         /// </summary>
         private const string BaseRuntimeMoniker = "Microsoft.NETCore.App";
 
@@ -76,6 +79,12 @@ namespace Server.Utilities
             Console.Error.WriteLine();
         }
 
+        /// <summary>
+        /// Shells out to <c>dotnet --list-runtimes</c> so the operator can see exactly what
+        /// is (and isn't) installed. Highlights the common misinstall case where a .NET
+        /// SDK / desktop / ASP.NET variant is present but the base runtime under
+        /// <see cref="BaseRuntimeMoniker"/> is missing.
+        /// </summary>
         private static void WriteInstalledRuntimeDiagnostics()
         {
             if (!TryListInstalledRuntimes(out var installedRuntimes))
@@ -93,33 +102,39 @@ namespace Server.Utilities
             foreach (var runtime in installedRuntimes)
                 Console.Error.WriteLine($"   {runtime}");
 
-            var hasAnyRequired = false;
-            var hasBaseRequired = false;
+            var hasAnyCorrectNet = false;
+            var hasBaseCorrectNet = false;
             foreach (var runtime in installedRuntimes)
             {
                 if (!LooksLikeMajor(runtime, RequiredMajorVersion))
                     continue;
 
-                hasAnyRequired = true;
+                hasAnyCorrectNet = true;
                 if (runtime.StartsWith(BaseRuntimeMoniker + " ", StringComparison.OrdinalIgnoreCase))
-                    hasBaseRequired = true;
+                    hasBaseCorrectNet = true;
             }
 
             Console.Error.WriteLine();
-            if (hasAnyRequired && !hasBaseRequired)
+            if (hasAnyCorrectNet && !hasBaseCorrectNet)
             {
                 Console.Error.WriteLine($" NOTE: A .NET {RequiredMajorVersion} install is present, but the base '{BaseRuntimeMoniker}'");
                 Console.Error.WriteLine(" runtime that LunaServer needs is missing. This typically happens when");
-                Console.Error.WriteLine(" only the SDK listing or a specialized runtime (Desktop / ASP.NET Core) got picked up.");
-                Console.Error.WriteLine($" Install the plain \".NET Runtime\" {RequiredMajorVersion}.x from the page above.");
+                Console.Error.WriteLine($" only the .NET {RequiredMajorVersion} SDK listing or a specialized runtime (Desktop /");
+                Console.Error.WriteLine($" ASP.NET Core) got picked up. Install the plain \".NET Runtime\" {RequiredMajorVersion}.x");
+                Console.Error.WriteLine(" from the page above.");
             }
-            else if (!hasAnyRequired)
+            else if (!hasAnyCorrectNet)
             {
                 Console.Error.WriteLine($" NOTE: No .NET {RequiredMajorVersion}.x runtime was found. The versions listed above are");
                 Console.Error.WriteLine($" not compatible with this server - install .NET {RequiredMajorVersion} as described.");
             }
         }
 
+        /// <summary>
+        /// True when <paramref name="runtimeLine"/> (e.g. "Microsoft.NETCore.App 6.0.25 [...]")
+        /// reports a version whose major equals <paramref name="requiredMajor"/>. The first
+        /// space-separated token after the moniker is the version.
+        /// </summary>
         private static bool LooksLikeMajor(string runtimeLine, int requiredMajor)
         {
             var firstSpace = runtimeLine.IndexOf(' ');
@@ -160,6 +175,8 @@ namespace Server.Utilities
                 foreach (var rawLine in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                 {
                     var line = rawLine.Trim();
+                    // Lines look like: "Microsoft.NETCore.App 6.0.25 [C:\Program Files\dotnet\shared\...]"
+                    // Strip the trailing install-path bracket so the diagnostic stays compact.
                     var bracket = line.IndexOf('[');
                     if (bracket > 0) line = line.Substring(0, bracket).TrimEnd();
                     if (line.Length > 0) runtimes.Add(line);
@@ -168,10 +185,18 @@ namespace Server.Utilities
             }
             catch
             {
+                // dotnet CLI not on PATH, or the probe failed for some other reason.
+                // Skipping diagnostics is preferable to crashing the error reporter.
                 return false;
             }
         }
 
+        /// <summary>
+        /// Keeps the console open until the operator acknowledges the error. Tries an
+        /// interactive key press first, falls back to reading a line, and finally sleeps
+        /// for a long time so a truly non-interactive launch (e.g. from a service wrapper)
+        /// still leaves the message visible in logs rather than exiting instantly.
+        /// </summary>
         private static void BlockUntilKeyPress()
         {
             Console.Error.WriteLine("Press any key to exit...");
@@ -182,6 +207,8 @@ namespace Server.Utilities
             if (TryBlockOnReadLine())
                 return;
 
+            // Non-interactive launch: give an operator up to five minutes to notice the
+            // message in whatever captured the output before we give up and exit.
             try { Thread.Sleep(TimeSpan.FromMinutes(5)); } catch { /* shutdown requested */ }
         }
 

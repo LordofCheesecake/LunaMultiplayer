@@ -43,6 +43,10 @@ namespace LmpClient.VesselUtilities
                 if (!forceReload && existingVessel.Parts.Count == vesselProto.protoPartSnapshots.Count &&
                     existingVessel.GetCrewCount() == vesselProto.GetVesselCrew().Count)
                 {
+                    // Always keep the stored flight plan current even when skipping a full reload.
+                    // Without this, maneuver node changes are discarded and the vessel's
+                    // PatchedConicSolver loads stale (empty) data on the next GoOffRails.
+                    existingVessel.protoVessel.flightPlan = vesselProto.flightPlan;
                     return true;
                 }
 
@@ -66,12 +70,7 @@ namespace LmpClient.VesselUtilities
                 LunaLog.Log($"[LMP]: Loading vessel {vesselProto.vesselID}");
             }
 
-            // Vessel.Start() calls Vessel.RebuildCrewList() which iterates protoModuleCrew on every
-            // ProtoPartSnapshot.  A null slot in that list causes a NullReferenceException that Unity
-            // catches internally (logged as [EXC]) — it never reaches our catch block below.  Strip
-            // nulls here so RebuildCrewList() always receives a clean list.
-            foreach (var snapshot in vesselProto.protoPartSnapshots)
-                snapshot.protoModuleCrew?.RemoveAll(c => c == null);
+            SanitizePersistentIds(vesselProto);
 
             DiscoveryInfoSanitizer.EnsureSafeDiscoveryInfo(vesselProto);
 
@@ -203,6 +202,55 @@ namespace LmpClient.VesselUtilities
             }
 
             return true;
+        }
+
+        #endregion
+
+        #region ID sanitization
+
+        /// <summary>
+        /// Proactively remaps any persistentId values in vesselProto that already exist in the
+        /// running FlightGlobals registries (PersistentVesselIds, PersistentLoadedPartIds,
+        /// PersistentUnloadedPartIds) before the vessel is loaded into the game.
+        ///
+        /// Without this, KSP's HandlePartPersistentIdCollision fires O(n) times per conflicting
+        /// part on the main thread, which under concurrent LMP vessel loads can cascade into a
+        /// freeze when many parts collide simultaneously.  By remapping upfront using
+        /// FlightGlobals.GetUniquepersistentId() we hand KSP clean IDs and the collision handler
+        /// never fires.
+        ///
+        /// The incoming proto IDs are transient transport values — they only need to be unique on
+        /// this client.  The authoritative state is the server's save, so remapping here is safe.
+        /// </summary>
+        private static void SanitizePersistentIds(ProtoVessel vesselProto)
+        {
+            // Strip null crew slots before load — Vessel.Start() calls RebuildCrewList() which
+            // iterates protoModuleCrew on every ProtoPartSnapshot; a null slot causes a
+            // NullReferenceException that Unity catches internally (never reaches our catch block).
+            foreach (var snapshot in vesselProto.protoPartSnapshots)
+                snapshot.protoModuleCrew?.RemoveAll(c => c == null);
+
+            // Vessel-level persistentId
+            if (FlightGlobals.PersistentVesselIds.ContainsKey(vesselProto.persistentId))
+            {
+                var newId = FlightGlobals.GetUniquepersistentId();
+                LunaLog.Log($"[LMP]: PersistentId collision — remapping vessel {vesselProto.vesselID} " +
+                            $"vessel persistentId {vesselProto.persistentId} → {newId}");
+                vesselProto.persistentId = newId;
+            }
+
+            // Per-part persistentId (ProtoPartSnapshot)
+            foreach (var part in vesselProto.protoPartSnapshots)
+            {
+                if (FlightGlobals.PersistentLoadedPartIds.ContainsKey(part.persistentId) ||
+                    FlightGlobals.PersistentUnloadedPartIds.ContainsKey(part.persistentId))
+                {
+                    var newId = FlightGlobals.GetUniquepersistentId();
+                    LunaLog.Log($"[LMP]: PersistentId collision — remapping vessel {vesselProto.vesselID} " +
+                                $"part {part.partName} persistentId {part.persistentId} → {newId}");
+                    part.persistentId = newId;
+                }
+            }
         }
 
         #endregion

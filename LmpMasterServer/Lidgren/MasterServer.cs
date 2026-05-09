@@ -323,11 +323,17 @@ namespace LmpMasterServer.Lidgren
                         (var id, var endpoint) = item;
                         if (ServerDictionary.TryGetValue(id, out var server))
                         {
-                            try {
-                                var didWork = await server.SetCountryFromEndpointAsync(endpoint);
-                                if (didWork)
+                            try 
+                            {
+                                if (await server.SetCountryFromEndpointAsync(endpoint))
                                     await Task.Delay(Server.MinCountryCodeRefreshInterval);
-                            } catch {}
+                                else
+                                    Server.CountryCodeRefreshQueue.Enqueue(item);
+                            }
+                            catch
+                            {
+                                Server.CountryCodeRefreshQueue.Enqueue(item);
+                            }
                         }
                     } else {
                         await Task.Delay(CountryCodeRefreshInterval);

@@ -497,6 +497,7 @@
     <Compile Include="Systems\VesselLockSys\VesselLockEvents.cs" />
     <Compile Include="Systems\VesselLockSys\VesselLockSystem.cs" />
     <Compile Include="VesselUtilities\VesselLoader.cs" />
+    <Compile Include="VesselUtilities\DockingPortUtil.cs" />
     <Compile Include="Systems\VesselProtoSys\VesselProtoMessageHandler.cs" />
     <Compile Include="Systems\VesselProtoSys\VesselProtoMessageSender.cs" />
     <Compile Include="Systems\VesselProtoSys\VesselProtoSystem.cs" />
