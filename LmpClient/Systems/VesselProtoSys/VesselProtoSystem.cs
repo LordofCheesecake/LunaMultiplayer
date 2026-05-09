@@ -264,7 +264,7 @@ namespace LmpClient.Systems.VesselProtoSys
         /// Sends a delayed vessel definition to the server.
         /// Call this method if you expect to do a lot of modifications to a vessel and you want to send it only once
         /// </summary>
-        public void DelayedSendVesselMessage(Guid vesselId, float delayInSec, bool forceReload = false)
+        public void DelayedSendVesselMessage(Guid vesselId, float delayInSec, bool forceReload = false, string reason = null)
         {
             if (QueuedVesselsToSend.Contains(vesselId)) return;
 
@@ -273,7 +273,9 @@ namespace LmpClient.Systems.VesselProtoSys
             {
                 QueuedVesselsToSend.Remove(vesselId);
 
-                LunaLog.Log($"[LMP]: Sending delayed proto vessel {vesselId}");
+                LunaLog.Log(reason != null
+                    ? $"[LMP]: Sending delayed proto vessel {vesselId} ({reason})"
+                    : $"[LMP]: Sending delayed proto vessel {vesselId}");
                 MessageSender.SendVesselMessage(FlightGlobals.FindVessel(vesselId));
             }, delayInSec);
         }

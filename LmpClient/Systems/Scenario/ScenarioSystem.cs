@@ -107,6 +107,28 @@ namespace LmpClient.Systems.Scenario
         }
 
         /// <summary>
+        /// Parses and sends one loaded scenario module immediately (skips the periodic sync interval).
+        /// </summary>
+        public void SendScenarioModuleImmediate(string moduleName)
+        {
+            if (!Enabled || string.IsNullOrEmpty(moduleName)) return;
+
+            try
+            {
+                var module = ScenarioRunner.GetLoadedModules()?.FirstOrDefault(m => m != null && m.GetType().Name == moduleName);
+                if (module == null) return;
+
+                ScenariosConfigNodes.Clear();
+                ParseModulesToConfigNodes(new[] { module });
+                TaskFactory.StartNew(SendModulesConfigNodes);
+            }
+            catch (Exception e)
+            {
+                LunaLog.LogError($"Error while trying to send scenario module '{moduleName}' immediately. Details {e}");
+            }
+        }
+
+        /// <summary>
         /// This transforms the scenarioModule to a config node. We cannot do this in another thread as Lingoona 
         /// is called sometimes and that makes a hard crash
         /// </summary>
