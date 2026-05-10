@@ -77,6 +77,8 @@ The Pi (`naundorfit@192.168.178.70`) runs the server from `~/LunaMultiplayer` vi
 
 Bump `PATCH` in all of:
 
+- **Displayed in-game PATCH** follows **`LmpCommon.dll`** `AssemblyVersion` via `LmpCommon/LmpVersioning.cs`; see [`.cursor/skills/lmp-client-ui-version/SKILL.md`](../lmp-client-ui-version/SKILL.md) so packaging and Plugins stay in sync after a bump.
+
 - `LunaMultiplayer.version` (JSON `VERSION.PATCH`)
 - Every `**/Properties/AssemblyInfo.cs`:
   `Lidgren`, `LmpClient`, `LmpCommon`, `LmpGlobal`, `LmpMasterServer`, `LmpUpdater`, `MasterServer`, `Server` (eight files).

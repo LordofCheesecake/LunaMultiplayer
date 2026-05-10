@@ -11,17 +11,18 @@ jobs:
   build-client:
     name: Build LmpClient and package mod
     runs-on: windows-latest
+    # KSP stub DLLs are behind a repo secret; forks and branches without it skip this job.
+    if: secrets.KSP_LIBS_PASSWORD != ''
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
-      # .NET Framework 4.7.2 reference assemblies are pre-installed on windows-latest.
       # Extract the KSP/Unity DLLs that LmpClient.csproj references from the
       # password-protected archive. Store the password in Settings > Secrets as
       # KSP_LIBS_PASSWORD.
@@ -29,6 +30,10 @@ jobs:
         env:
           KSP_LIBS_PASSWORD: ${{ secrets.KSP_LIBS_PASSWORD }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:KSP_LIBS_PASSWORD)) {
+            Write-Error 'KSP_LIBS_PASSWORD is empty; this job should not run without the repository secret.'
+            exit 1
+          }
           7z x External\KSPLibraries\KSPLibraries.7z -oExternal\KSPLibraries\ -p"$env:KSP_LIBS_PASSWORD" -y
 
       - name: Restore
@@ -44,14 +49,100 @@ jobs:
       - name: Upload artifact (every push/PR)
         uses: actions/upload-artifact@v4
         with:
-          name: LunaMultiplayer-${{ github.sha }}
+          name: lmp-release-win-${{ github.sha }}
           path: dist\*.zip
           if-no-files-found: error
 
-      # Attach zip to a GitHub Release when a v* tag is pushed
+  build-server-linux:
+    name: Publish server binaries (Ubuntu; includes win-x64 via cross-publish)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Zip publish outputs
+        run: |
+          set -euxo pipefail
+          readme="LMP Readme.txt"
+          mkdir -p publish-out
+
+          bundle_server() {
+            local rid="$1"
+            local zipname="$2"
+            local work="work-$rid"
+            rm -rf "$work"
+            dotnet publish Server/Server.csproj -c Release -r "$rid" --self-contained true \
+              -p:PublishSingleFile=false -p:PublishTrimmed=false -o "$work/LMPServer"
+            mkdir -p "bundle-$rid"
+            cp "$readme" "bundle-$rid/"
+            mv "$work/LMPServer" "bundle-$rid/"
+            ( cd "bundle-$rid" && zip -r "$GITHUB_WORKSPACE/publish-out/$zipname" . )
+            rm -rf "$work" "bundle-$rid"
+          }
+
+          bundle_server linux-x64 LunaMultiplayer-Server-linux-x64-Release.zip
+          bundle_server linux-arm64 LunaMultiplayer-Server-linux-arm64-Release.zip
+          bundle_server linux-arm LunaMultiplayer-Server-linux-arm32-Release.zip
+
+          rm -rf work-win bundle-win
+          dotnet publish Server/Server.csproj -c Release -r win-x64 --self-contained true \
+            -p:PublishSingleFile=false -p:PublishTrimmed=false -o work-win/LMPServer
+          mkdir -p bundle-win
+          cp "$readme" bundle-win/
+          mv work-win/LMPServer bundle-win/
+          ( cd bundle-win && zip -r "$GITHUB_WORKSPACE/publish-out/LunaMultiplayer-Server-win-x64-Release.zip" . )
+          rm -rf work-win bundle-win
+
+          rm -rf work-any bundle-any
+          dotnet publish Server/Server.csproj -c Release --self-contained false \
+            -p:PublishSingleFile=false -o work-any/LMPServer
+          mkdir -p bundle-any
+          cp "$readme" bundle-any/
+          mv work-any/LMPServer bundle-any/
+          ( cd bundle-any && zip -r "$GITHUB_WORKSPACE/publish-out/LunaMultiplayer-Server-any-Release.zip" . )
+          rm -rf work-any bundle-any
+
+          rm -rf work-ms
+          dotnet publish MasterServer/MasterServer.csproj -c Release --os linux --self-contained false \
+            -p:PublishSingleFile=false -o work-ms/LMPMasterServer
+          ( cd work-ms && zip -r "$GITHUB_WORKSPACE/publish-out/LunaMultiplayerMasterServer-Release.zip" LMPMasterServer )
+          rm -rf work-ms
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lmp-release-linux-${{ github.sha }}
+          path: publish-out/*.zip
+          if-no-files-found: error
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-client, build-server-linux]
+    if: >-
+      startsWith(github.ref, 'refs/tags/v')
+      && needs.build-server-linux.result == 'success'
+      && (needs.build-client.result == 'success' || needs.build-client.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: lmp-release-*-${{ github.sha }}
+          merge-multiple: true
+          path: release-assets
+          if-no-files-found: error
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist\*.zip
+          files: release-assets/*.zip
           generate_release_notes: true

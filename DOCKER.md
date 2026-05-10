@@ -7,8 +7,11 @@ Two images are shipped:
 | `lunamultiplayer` | `Dockerfile_Server` | Game server you host for players | `8800/udp`, `8900/tcp` (HTTP admin) |
 | `lmpms` | `Dockerfile_MasterServer` | Master server for the LMP federation | `8700/udp`, `8701/tcp` |
 
-Both target Alpine-based self-contained .NET 10 and are multi-arch
-(`linux/amd64`, `linux/arm64`, `linux/arm/v7`).
+Both target Alpine-based self-contained **.NET 10** (`runtime-deps` + musl RID).
+The Dockerfile has two stages (`build` publishes from SDK; `runtime` copies the
+published output only). Compose `docker-compose.yml` can still pin
+`platforms: ["linux/amd64"]` or other arches for local cross-builds; GitHub Actions
+Docker smoke builds use **linux/amd64 only** (see `.github/workflows/docker-build.yml`).
 
 ## Quick start with Compose
 
@@ -73,17 +76,6 @@ docker build -f Dockerfile_Server \
   -t lmpsrv:latest .
 ```
 
-## Debug shell
-
-`Dockerfile_Server` has a `debug` stage that drops you into an SDK shell with
-the source tree available. Useful for `dotnet test`, profiling or
-troubleshooting without rebuilding the final image:
-
-```sh
-docker build --target debug -f Dockerfile_Server -t lmpsrv:debug .
-docker run --rm -it lmpsrv:debug
-```
-
 ## Build-cache tips
 
 The Dockerfiles use BuildKit [cache mounts](https://docs.docker.com/build/cache/optimize/#cache-mounts)
@@ -91,6 +83,9 @@ for `/root/.nuget/packages`. BuildKit is on by default in current Docker
 Desktop / Engine; you need nothing extra. In CI, pair with the
 `docker/build-push-action` `cache-from` / `cache-to` options (see
 `.github/workflows/docker-build.yml`).
+
+Pushes to **`ghcr.io` are manual** (`workflow_dispatch` only); see
+`.github/workflows/docker-push.yml`.
 
 ## Shutdown semantics
 

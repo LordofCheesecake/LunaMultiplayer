@@ -1,17 +1,13 @@
 # syntax=docker/dockerfile:1.7
 #
-# LunaMultiplayer master-server image. Build/run recipes live in DOCKER.md.
-# Multi-arch: linux/amd64, linux/arm64, linux/arm/v7.
+# LunaMultiplayer master-server image. Build/run recipes: DOCKER.md
+# Multi-arch: linux/amd64, linux/arm64, linux/arm/v7
 
 ARG DOTNET_SDK_VERSION=10.0-alpine
-# `-extra` variant ships ICU + tzdata. The master server runs country-code
-# lookups via ICU and the plain `10.0-alpine` is globalization-invariant.
 ARG DOTNET_RUNTIME_VERSION=10.0-alpine-extra
 
 ################################################################################
-# Stage: restore
-################################################################################
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_SDK_VERSION} AS restore
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_SDK_VERSION} AS build
 WORKDIR /src
 
 ENV DOTNET_NOLOGO=1 \
@@ -19,23 +15,11 @@ ENV DOTNET_NOLOGO=1 \
     DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
     NUGET_XMLDOC_MODE=skip
 
-# MasterServer's project graph.
-COPY .nuget                                 .nuget
-COPY LunaMultiPlayer.sln                    LunaMultiPlayer.sln
-COPY LmpCommon/LmpCommon.csproj             LmpCommon/LmpCommon.csproj
-COPY LmpGlobal/LmpGlobal.csproj             LmpGlobal/LmpGlobal.csproj
-COPY Lidgren/Lidgren.projitems              Lidgren/Lidgren.projitems
-COPY Lidgren.Core/Lidgren.Core.csproj       Lidgren.Core/Lidgren.Core.csproj
-COPY Lidgren.Net/Lidgren.Net.csproj         Lidgren.Net/Lidgren.Net.csproj
-COPY uhttpsharp/uhttpsharp.csproj           uhttpsharp/uhttpsharp.csproj
-COPY uhttpsharp/packages.config             uhttpsharp/packages.config
-COPY LmpUpdater/LmpUpdater.csproj           LmpUpdater/LmpUpdater.csproj
-COPY LmpMasterServer/LmpMasterServer.csproj LmpMasterServer/LmpMasterServer.csproj
-COPY MasterServer/MasterServer.csproj       MasterServer/MasterServer.csproj
+COPY . .
 
 ARG TARGETARCH
-ARG TARGETVARIANT
 
+# Trimming off: publish-trim hits NETSDK1124 on shared netstandard libs.
 RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
     set -eux; \
     case "${TARGETARCH}" in \
@@ -44,43 +28,17 @@ RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
       arm)   RID=linux-musl-arm ;; \
       *)     echo "Unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
     esac; \
-    echo "${RID}" > /tmp/rid; \
-    dotnet restore MasterServer/MasterServer.csproj -r "${RID}"
-
-################################################################################
-# Stage: build
-################################################################################
-FROM restore AS build
-WORKDIR /src
-
-COPY . .
-
-ARG TARGETARCH
-ARG TARGETVARIANT
-
-# Trimming deliberately off: shared libraries target netstandard2.0 and
-# publish-trim emits NETSDK1124 against them.
-RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
-    set -eux; \
-    RID="$(cat /tmp/rid)"; \
     dotnet publish MasterServer/MasterServer.csproj \
       -c Release \
       -r "${RID}" \
       --self-contained true \
-      --no-restore \
       -p:DebugType=embedded \
       -o /publish
 
 ################################################################################
-# Stage: runtime
-# icu-data-full is required to cross-reference country codes in server-list
-# filtering; icu-libs ships the library but not the full locale data.
-################################################################################
 FROM mcr.microsoft.com/dotnet/runtime-deps:${DOTNET_RUNTIME_VERSION} AS runtime
 
-# `-extra` base already ships ICU + tzdata. `icu-data-full` is a separate
-# package for the complete locale data set (needed for country-code lookups);
-# install alongside the base upgrade.
+# Full ICU data for country-code lookups in server-list filtering.
 RUN apk add --no-cache icu-data-full \
  && apk upgrade --no-cache
 
