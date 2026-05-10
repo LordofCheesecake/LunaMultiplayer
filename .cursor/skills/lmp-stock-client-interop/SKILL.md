@@ -98,7 +98,7 @@ done
 
 ```bash
 git add -A && git commit -m "fix(server): <summary>; bump 0.29.N"
-git push origin master
+git push origin main
 git tag -a v0.29.N -m "v0.29.N — <one-line>"
 git push origin v0.29.N
 ```
