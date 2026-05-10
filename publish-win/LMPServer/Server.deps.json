@@ -1006,8 +1006,8 @@
       "Lidgren.Core/1.0.0": {
         "runtime": {
           "Lidgren.Core.dll": {
-            "assemblyVersion": "0.29.7.0",
-            "fileVersion": "0.29.7.0"
+            "assemblyVersion": "0.29.9.0",
+            "fileVersion": "0.29.9.0"
           }
         }
       },
@@ -1020,16 +1020,16 @@
         },
         "runtime": {
           "LmpCommon.dll": {
-            "assemblyVersion": "0.29.7.0",
-            "fileVersion": "0.29.7.0"
+            "assemblyVersion": "0.29.9.0",
+            "fileVersion": "0.29.9.0"
           }
         }
       },
       "LmpGlobal/1.0.0": {
         "runtime": {
           "LmpGlobal.dll": {
-            "assemblyVersion": "0.29.7.0",
-            "fileVersion": "0.29.7.0"
+            "assemblyVersion": "0.29.9.0",
+            "fileVersion": "0.29.9.0"
           }
         }
       },
@@ -1041,8 +1041,8 @@
         },
         "runtime": {
           "LmpUpdater.dll": {
-            "assemblyVersion": "0.29.7.0",
-            "fileVersion": "0.29.7.0"
+            "assemblyVersion": "0.29.9.0",
+            "fileVersion": "0.29.9.0"
           }
         }
       },
