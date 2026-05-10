@@ -40,7 +40,24 @@ namespace Server.System.Vessel
                 {
                     lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {
-                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel))
+                        {
+                            LogIfVesselMissingFromStore(msgData.VesselId, "position");
+                            return;
+                        }
+
+                        var incomingRefIndex = (int)Math.Round(msgData.Orbit[7], MidpointRounding.AwayFromZero);
+                        var skipOrbitalElementBlock = false;
+                        var persistedRefValue = vessel.Orbit.GetSingle("REF")?.Value;
+                        if (!string.IsNullOrEmpty(persistedRefValue) &&
+                            int.TryParse(persistedRefValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var persistedRefIndex) &&
+                            persistedRefIndex != incomingRefIndex)
+                        {
+                            var persistedBodyName = vessel.GetOrbitingBodyName();
+                            var messageBodyName = msgData.BodyName?.Trim() ?? string.Empty;
+                            if (string.Equals(persistedBodyName, messageBodyName, StringComparison.OrdinalIgnoreCase))
+                                skipOrbitalElementBlock = true;
+                        }
 
                         vessel.Fields.Update("lat", msgData.LatLonAlt[0].ToString(CultureInfo.InvariantCulture));
                         vessel.Fields.Update("lon", msgData.LatLonAlt[1].ToString(CultureInfo.InvariantCulture));
@@ -57,14 +74,17 @@ namespace Server.System.Vessel
                                                     $"{msgData.SrfRelRotation[2].ToString(CultureInfo.InvariantCulture)}," +
                                                     $"{msgData.SrfRelRotation[3].ToString(CultureInfo.InvariantCulture)}");
 
-                        vessel.Orbit.Update("INC", msgData.Orbit[0].ToString(CultureInfo.InvariantCulture));
-                        vessel.Orbit.Update("ECC", msgData.Orbit[1].ToString(CultureInfo.InvariantCulture));
-                        vessel.Orbit.Update("SMA", msgData.Orbit[2].ToString(CultureInfo.InvariantCulture));
-                        vessel.Orbit.Update("LAN", msgData.Orbit[3].ToString(CultureInfo.InvariantCulture));
-                        vessel.Orbit.Update("LPE", msgData.Orbit[4].ToString(CultureInfo.InvariantCulture));
-                        vessel.Orbit.Update("MNA", msgData.Orbit[5].ToString(CultureInfo.InvariantCulture));
-                        vessel.Orbit.Update("EPH", msgData.Orbit[6].ToString(CultureInfo.InvariantCulture));
-                        vessel.Orbit.Update("REF", msgData.Orbit[7].ToString(CultureInfo.InvariantCulture));
+                        if (!skipOrbitalElementBlock)
+                        {
+                            vessel.Orbit.Update("INC", msgData.Orbit[0].ToString(CultureInfo.InvariantCulture));
+                            vessel.Orbit.Update("ECC", msgData.Orbit[1].ToString(CultureInfo.InvariantCulture));
+                            vessel.Orbit.Update("SMA", msgData.Orbit[2].ToString(CultureInfo.InvariantCulture));
+                            vessel.Orbit.Update("LAN", msgData.Orbit[3].ToString(CultureInfo.InvariantCulture));
+                            vessel.Orbit.Update("LPE", msgData.Orbit[4].ToString(CultureInfo.InvariantCulture));
+                            vessel.Orbit.Update("MNA", msgData.Orbit[5].ToString(CultureInfo.InvariantCulture));
+                            vessel.Orbit.Update("EPH", msgData.Orbit[6].ToString(CultureInfo.InvariantCulture));
+                            vessel.Orbit.Update("REF", msgData.Orbit[7].ToString(CultureInfo.InvariantCulture));
+                        }
 
                         ApplyOrbitIdent(vessel, msgData.BodyName);
 

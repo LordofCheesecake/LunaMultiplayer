@@ -40,7 +40,11 @@ namespace Server.System.Vessel
                 {
                     lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {
-                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel))
+                        {
+                            LogIfVesselMissingFromStore(msgData.VesselId, "update");
+                            return;
+                        }
 
                         vessel.Fields.Update("name", msgData.Name);
                         vessel.Fields.Update("type", msgData.Type);

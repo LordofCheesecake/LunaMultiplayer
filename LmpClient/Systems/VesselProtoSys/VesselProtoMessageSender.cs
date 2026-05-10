@@ -1,4 +1,5 @@
-﻿using LmpClient.Base;
+﻿using LmpClient;
+using LmpClient.Base;
 using LmpClient.Base.Interface;
 using LmpClient.Extensions;
 using LmpClient.Network;
@@ -21,6 +22,9 @@ namespace LmpClient.Systems.VesselProtoSys
         private static readonly byte[] VesselSerializedBytes = new byte[10 * 1024 * 1000];
 
         private static readonly object VesselArraySyncLock = new object();
+
+        private const int ProtoSerializeRetryMaxAttempts = 6;
+        private const int ProtoSerializeRetryFrameDelay = 2;
 
         public void SendMessage(IMessageData msg)
         {
@@ -101,8 +105,83 @@ namespace LmpClient.Systems.VesselProtoSys
                         LunaLog.Log($"Serialization of debris vessel: {protoVessel.vesselID} name: {protoVessel.vesselName} failed. Adding to kill list");
                         VesselRemoveSystem.Singleton.KillVessel(protoVessel.vesselID, true, "Serialization of debris failed");
                     }
+                    else
+                    {
+                        var retryVesselId = protoVessel.vesselID;
+                        var retryForceReload = forceReload;
+                        var retryReason = reason;
+                        LunaLog.LogWarning(
+                            $"[LMP]: Proto serialize produced 0 bytes for {retryVesselId} ({protoVessel.vesselName}); scheduling main-thread retry (NaN orbit / Save failure).");
+                        MainSystem.EnqueueMainThreadAction(() => BeginSerializeRetry(retryVesselId, retryForceReload, retryReason));
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// Re-attempts <see cref="SendVesselMessage(Vessel,bool,string)"/> from the Unity thread after a background
+        /// serialize produced 0 bytes (e.g. transient NaN right after decouple).
+        /// </summary>
+        internal void BeginSerializeRetry(Guid vesselId, bool forceReload, string reason)
+        {
+            ScheduleSerializeRetryAfterFrames(vesselId, forceReload, reason, 0, ProtoSerializeRetryFrameDelay);
+        }
+
+        private void ScheduleSerializeRetryAfterFrames(Guid vesselId, bool forceReload, string reason, int attemptIndex, int framesDelay)
+        {
+            if (attemptIndex >= ProtoSerializeRetryMaxAttempts)
+            {
+                LunaLog.LogWarning($"[LMP]: Gave up retrying proto send for vessel {vesselId} after {ProtoSerializeRetryMaxAttempts} attempts.");
+                return;
+            }
+
+            CoroutineUtil.StartFrameDelayedRoutine($"ProtoSerializeRetry_{vesselId}_{attemptIndex}", () =>
+            {
+                var vessel = FlightGlobals.FindVessel(vesselId);
+                if (vessel == null || vessel.state == Vessel.State.DEAD || VesselRemoveSystem.Singleton.VesselWillBeKilled(vesselId))
+                {
+                    ScheduleSerializeRetryAfterFrames(vesselId, forceReload, reason, attemptIndex + 1, ProtoSerializeRetryFrameDelay);
+                    return;
+                }
+
+                if (!vessel.orbitDriver || !vessel.orbitDriver.Ready())
+                {
+                    ScheduleSerializeRetryAfterFrames(vesselId, forceReload, reason, attemptIndex + 1, ProtoSerializeRetryFrameDelay);
+                    return;
+                }
+
+                ProtoVessel backup;
+                try
+                {
+                    backup = vessel.BackupVessel();
+                }
+                catch (Exception ex)
+                {
+                    LunaLog.LogWarning($"[LMP]: BackupVessel failed on proto retry for {vesselId}: {ex.Message}");
+                    ScheduleSerializeRetryAfterFrames(vesselId, forceReload, reason, attemptIndex + 1, ProtoSerializeRetryFrameDelay);
+                    return;
+                }
+
+                var cfg = new ConfigNode();
+                try
+                {
+                    backup.Save(cfg);
+                }
+                catch (Exception ex)
+                {
+                    LunaLog.LogWarning($"[LMP]: Proto Save failed on retry for {vesselId}: {ex.Message}");
+                    ScheduleSerializeRetryAfterFrames(vesselId, forceReload, reason, attemptIndex + 1, ProtoSerializeRetryFrameDelay);
+                    return;
+                }
+
+                if (cfg.VesselHasNaNPosition())
+                {
+                    ScheduleSerializeRetryAfterFrames(vesselId, forceReload, reason, attemptIndex + 1, ProtoSerializeRetryFrameDelay);
+                    return;
+                }
+
+                SendVesselMessage(vessel, forceReload, reason);
+            }, framesDelay);
         }
 
         #endregion

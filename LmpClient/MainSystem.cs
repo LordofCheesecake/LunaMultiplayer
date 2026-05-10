@@ -22,6 +22,7 @@ using LmpClient.Windows;
 using LmpCommon;
 using LmpCommon.Enums;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -73,6 +74,21 @@ namespace LmpClient
         /// </summary>
         public static bool IsUnityThread => Thread.CurrentThread.ManagedThreadId == _mainThreadId;
 
+        /// <summary>
+        /// Actions queued from worker threads to run on the next Unity <see cref="Update"/> (e.g. proto retry after
+        /// background serialize failed with 0 bytes).
+        /// </summary>
+        private static readonly ConcurrentQueue<Action> PendingMainThreadActions = new ConcurrentQueue<Action>();
+
+        /// <summary>
+        /// Enqueues an action to run on the Unity main thread during <see cref="Update"/>.
+        /// </summary>
+        public static void EnqueueMainThreadAction(Action action)
+        {
+            if (action != null)
+                PendingMainThreadActions.Enqueue(action);
+        }
+
         //Diagnostic heartbeat state (see EmitHeartbeat). Wall-clock pacing via
         //Time.realtimeSinceStartup so we ignore Time.timeScale and pause behavior.
         private static float _heartbeatLastUpdateAt;
@@ -91,6 +107,18 @@ namespace LmpClient
         {
             LunaLog.ProcessLogMessages();
             LunaScreenMsg.ProcessScreenMessages();
+
+            while (PendingMainThreadActions.TryDequeue(out var deferredAction))
+            {
+                try
+                {
+                    deferredAction();
+                }
+                catch (Exception e)
+                {
+                    LunaLog.LogError($"[LMP]: Deferred main-thread action failed: {e}");
+                }
+            }
 
             //Diagnostic: emit a wall-clock heartbeat so we can tell idle SC time
             //apart from a hung Unity main thread when reading KSP.log after the fact.

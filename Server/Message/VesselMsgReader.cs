@@ -44,9 +44,15 @@ namespace Server.Message
                     break;
                 case VesselMessageType.Position:
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
-                    // LatestSubspace can be null during shutdown/reset; only persist when on the authoritative subspace.
+                    // Persist from latest subspace, or from whoever holds update sim authority (owners behind another
+                    // player's warp still need orbit/LATLON written to disk — see vessel persistence plan).
                     var latestSubspaceForPos = WarpContext.LatestSubspace;
-                    if (latestSubspaceForPos != null && client.Subspace == latestSubspaceForPos.Id)
+                    var vesselIdForPos = messageData.VesselId;
+                    var persistPosition =
+                        (latestSubspaceForPos != null && client.Subspace == latestSubspaceForPos.Id) ||
+                        LockSystem.LockQuery.UpdateLockBelongsToPlayer(vesselIdForPos, client.PlayerName) ||
+                        LockSystem.LockQuery.UnloadedUpdateLockBelongsToPlayer(vesselIdForPos, client.PlayerName);
+                    if (persistPosition)
                         VesselDataUpdater.WritePositionDataToFile(messageData);
                     break;
                 case VesselMessageType.Flightstate:
@@ -80,6 +86,10 @@ namespace Server.Message
                     VesselDataUpdater.WriteFairingDataToFile(messageData);
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
+                // Decouple: relay only. Universe store is populated by VesselProto; client-side retry on 0-byte
+                // serialize + rate-limited "not in CurrentVessels" logs address missing new-vessel protos. Server-side
+                // bootstrap (clone part subtree from parent) was evaluated and deferred behind a feature flag until
+                // metrics show proto+retry are still insufficient for late-join / backup correctness.
                 case VesselMessageType.Decouple:
                     MessageQueuer.RelayMessage<VesselSrvMsg>(client, messageData);
                     break;
