@@ -42,7 +42,11 @@ namespace Server.System.Vessel
                 {
                     lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {
-                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel))
+                        {
+                            LogIfVesselMissingFromStore(msgData.VesselId, "resource");
+                            return;
+                        }
 
                         // Resources is an array-pooled buffer whose Length may exceed ResourcesCount when a
                         // previous message had more entries; iterate only the live slice and null-guard each

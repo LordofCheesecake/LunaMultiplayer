@@ -40,7 +40,11 @@ namespace Server.System.Vessel
                 {
                     lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                     {
-                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                        if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel))
+                        {
+                            LogIfVesselMissingFromStore(msgData.VesselId, "flightstate");
+                            return;
+                        }
 
                         vessel.CtrlState.UpdateValue("pitch", msgData.Pitch.ToString(CultureInfo.InvariantCulture));
                         vessel.CtrlState.UpdateValue("yaw", msgData.Yaw.ToString(CultureInfo.InvariantCulture));

@@ -27,7 +27,11 @@ namespace Server.System.Vessel
             {
                 lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                 {
-                    if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                    if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel))
+                    {
+                        LogIfVesselMissingFromStore(msgData.VesselId, "part-sync-ui-field");
+                        return;
+                    }
 
                     UpdateProtoVesselFileWithNewPartSyncUiFieldData(vessel, msgData);
                 }

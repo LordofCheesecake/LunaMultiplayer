@@ -25,7 +25,11 @@ namespace Server.System.Vessel
             {
                 lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                 {
-                    if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                    if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel))
+                    {
+                        LogIfVesselMissingFromStore(msgData.VesselId, "fairing");
+                        return;
+                    }
 
                     var part = vessel.GetPart(msgData.PartFlightId);
                     // GetFirstModule avoids the "Key value is not unique" throw if a part ever carries more

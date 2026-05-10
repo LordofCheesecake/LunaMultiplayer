@@ -101,6 +101,21 @@ Tagged **v0.29.6**.
 
 Tagged **v0.29.7** (after this entry).
 
+### Vessel persistence + decouple resilience (v0.29.8)
+
+- Server `RawConfigNodeInsertOrUpdate` no longer poisons `LastAppliedProtoGameTime` on parse failure or ModControl rejection; the timestamp is advanced only after a successful merge under the per-vessel lock.
+- `VesselMsgReader.Position` persists when sender is on `LatestSubspace` OR holds Update / UnloadedUpdate lock (owners behind another player's warp now write orbit / lat-lon-alt to disk). Relay still unconditional.
+- `VesselPositionDataUpdater` skips the orbital element block (INC..REF) when persisted REF disagrees with `msgData.Orbit[7]` and `BodyName` matches persisted `IDENT` (cross-SOI guard); lat/lon/alt/normal still patched.
+- Client `VesselProtoMessageSender` queues a main-thread retry (up to 6 attempts, 2-frame spacing) when background serialize produces 0 bytes for non-debris vessels (transient NaN right after decouple); `MainSystem` adds `EnqueueMainThreadAction` + `Update`-time drain.
+
+Tagged **v0.29.8** (annotated tag pre-existed at the bump commit; first GitHub release with full artifacts is v0.29.9).
+
+### Multi-vessel writer logging parity (v0.29.9)
+
+- Extends `LogIfVesselMissingFromStore` (rate-limited debug, one line per vessel per 30 s) to all remaining server vessel writers when a partial update fires before any proto registered the vessel: `Flightstate`, `Resource`, `PartSyncField`, `PartSyncUiField`, `ActionGroup`, `Fairing`. Behavior otherwise unchanged.
+
+Tagged **v0.29.9** (after this entry). First clean tag with full client + Windows + Linux server artifacts attached on GitHub Releases.
+
 ---
 
-Current fork version in `LunaMultiplayer.version`: **0.29.7** (PATCH may change; re-open this file or run `git log` above after new tags).
+Current fork version in `LunaMultiplayer.version`: **0.29.9** (PATCH may change; re-open this file or run `git log` above after new tags).

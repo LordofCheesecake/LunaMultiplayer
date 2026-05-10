@@ -25,7 +25,11 @@ namespace Server.System.Vessel
             {
                 lock (Semaphore.GetOrAdd(msgData.VesselId, new object()))
                 {
-                    if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel)) return;
+                    if (!VesselStoreSystem.CurrentVessels.TryGetValue(msgData.VesselId, out var vessel))
+                    {
+                        LogIfVesselMissingFromStore(msgData.VesselId, "action-group");
+                        return;
+                    }
 
                     vessel.ActionGroups.Update(msgData.ActionGroupString, msgData.Value.ToString(CultureInfo.InvariantCulture));
                 }
